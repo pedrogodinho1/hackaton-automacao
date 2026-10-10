@@ -1,0 +1,1 @@
+# Crie e configure a aplicação Flask

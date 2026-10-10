@@ -1,0 +1,6 @@
+Lista de bibliotecas necessárias para o projeto. Para instalar, use o comando: pip install -r requirements.txt
+- Flask
+- pandas
+- openpyxl
+- Flask-SQLAlchemy
+- python-dotenv

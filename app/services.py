@@ -1,0 +1,1 @@
+# Faz a matemática: usa pandas para ler o Excel e validar as regras do CONAMA
