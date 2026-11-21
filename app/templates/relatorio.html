@@ -1,22 +1,263 @@
-<!--
-Template Jinja2: Relatório de Conformidade e Eficiência (relatorio.html)
+{% extends "base.html" %}
 
-Responsabilidade:
-- Exibir os resultados analíticos consolidados após o processamento da planilha/PDF.
-- Estrutura de visualização esperada:
-  1. Cabeçalho da campanha (Código do Laudo, Mês/Ano, Data de Coleta, Unidade, Laboratório).
-  2. Tabela de Efluente Tratado (P2) vs. Limites Legais com badges de "Conforme", "Não Conforme" e "Informativo".
-  3. Painel de Alertas de Não Conformidade com detalhamento da norma violada e prevalência da regra mais restritiva.
-  4. Tabela de Eficiência de Tratamento da ETE (P1 vs P2) para DBO, DQO e Sólidos Suspensos.
-  5. Tabela Comparativa do Corpo Receptor: Montante (P3) vs. Jusante (P4) e indicação de impacto da ETE.
--->
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <title>Relatório Analítico de Conformidade Ambiental</title>
-</head>
-<body>
-    <h1>Relatório Técnico de Qualidade de Efluentes</h1>
-</body>
-</html>
+{% block title %}Relatório Técnico - ETE Evonik{% endblock %}
+
+{% block content %}
+<div class="space-y-8 max-w-5xl mx-auto py-2">
+
+    <!-- Cabecalho do Relatorio -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white/80 border border-slate-200 rounded-xl p-6 shadow-2xs backdrop-blur-xs">
+        <div>
+            <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded border border-blue-200 bg-blue-50/60 text-blue-800 text-[11px] font-mono mb-2">
+                <span>LAUDO TÉCNICO DE CONFORMIDADE</span>
+            </div>
+            <h1 class="font-serif text-3xl sm:text-4xl text-blue-900 tracking-tight">
+                Parecer de Efluentes & Rio Piracicaba
+            </h1>
+            <p class="text-xs text-slate-500 font-mono mt-1">
+                Confronto: CONAMA 430/2011 • Decreto Estadual SP 8.468/1976 • CONAMA 357/2005 Classe 2
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('index') }}"
+               class="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium shadow-2xs transition-colors">
+                <span>&larr; Novo Envio</span>
+                <kbd class="font-mono text-[10px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded border border-slate-200">Esc</kbd>
+            </a>
+        </div>
+    </div>
+
+    {% if resultado %}
+    <!-- Metricas Tecnicas em Destaque (KPIs) -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span class="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Linhas Lidas</span>
+            <div class="text-2xl font-mono font-bold text-slate-900 mt-1">{{ resultado.total_linhas }}</div>
+            <span class="text-[11px] text-slate-500 font-mono">motor pandas</span>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span class="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Campanhas</span>
+            <div class="text-2xl font-mono font-bold text-slate-900 mt-1">{{ resultado.campanhas_processadas|length }}</div>
+            <span class="text-[11px] text-slate-500 font-mono">{{ resultado.campanhas_processadas|join(', ') }}</span>
+        </div>
+
+        <div class="bg-white border {% if resultado.total_alertas > 0 %}border-rose-200 bg-rose-50/20{% else %}border-slate-200{% endif %} rounded-xl p-4 shadow-2xs">
+            <span class="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Não Conformidades</span>
+            <div class="text-2xl font-mono font-bold mt-1 {% if resultado.total_alertas > 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                {{ resultado.total_alertas }}
+            </div>
+            <span class="text-[11px] text-slate-500 font-mono">em P2 (Tratado)</span>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+            <span class="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Eficiências</span>
+            <div class="text-2xl font-mono font-bold text-blue-700 mt-1">{{ resultado.eficiencias|length }}</div>
+            <span class="text-[11px] text-slate-500 font-mono">taxas de remoção</span>
+        </div>
+    </div>
+
+    <!-- Alertas de Nao Conformidade Detectados -->
+    {% if resultado.alertas %}
+    <div class="bg-white border border-rose-200 rounded-xl p-5 shadow-2xs">
+        <div class="flex items-center space-x-2 text-rose-700 mb-3">
+            <span class="font-mono text-xs px-2 py-0.5 rounded bg-rose-100 font-bold">ALERTA</span>
+            <h2 class="text-sm font-semibold text-rose-900">Não Conformidades Detectadas no Efluente Tratado (P2)</h2>
+        </div>
+        <div class="space-y-2.5">
+            {% for a in resultado.alertas %}
+            <div class="bg-rose-50/60 border border-rose-200/80 rounded-lg p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="font-mono font-bold text-rose-800">Mês {{ a.mes }}</span>
+                        <span class="text-slate-300">|</span>
+                        <strong class="font-semibold text-slate-900">{{ a.parametro }}</strong>
+                        <span class="text-[11px] font-mono text-rose-700">({{ a.norma_violada }})</span>
+                    </div>
+                    <p class="mt-1 text-slate-700 leading-relaxed font-mono text-[11px]">{{ a.mensagem }}</p>
+                </div>
+                <div class="shrink-0">
+                    <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-rose-600 text-white font-bold">
+                        VIOLAÇÃO
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Eficiencia da ETE -->
+    {% if resultado.eficiencias %}
+    <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-900">Eficiência de Tratamento da ETE (P1 Bruto vs P2 Tratado)</h2>
+                <p class="text-[11px] font-mono text-slate-500">Fórmula: ((P1 - P2) / P1) * 100</p>
+            </div>
+            <span class="font-mono text-xs text-blue-700">Meta DBO >= 60%</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-xs font-mono">
+                <thead class="bg-slate-50/80 text-slate-500 uppercase tracking-wider text-[11px]">
+                    <tr>
+                        <th class="px-5 py-2.5 text-left">Mês</th>
+                        <th class="px-5 py-2.5 text-left">Parâmetro</th>
+                        <th class="px-5 py-2.5 text-left">Entrada P1</th>
+                        <th class="px-5 py-2.5 text-left">Saída P2</th>
+                        <th class="px-5 py-2.5 text-left">Eficiência</th>
+                        <th class="px-5 py-2.5 text-right">Avaliação</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                    {% for ef in resultado.eficiencias %}
+                    <tr class="hover:bg-slate-50/60">
+                        <td class="px-5 py-2.5 font-bold text-slate-900">{{ ef.mes }}</td>
+                        <td class="px-5 py-2.5 font-sans font-medium text-slate-800">{{ ef.parametro }}</td>
+                        <td class="px-5 py-2.5 text-slate-600">{{ ef.entrada_p1 }} {{ ef.unidade }}</td>
+                        <td class="px-5 py-2.5 text-slate-600">{{ ef.saida_p2 }} {{ ef.unidade }}</td>
+                        <td class="px-5 py-2.5 text-sm font-bold text-blue-800">{{ ef.eficiencia_pct }}%</td>
+                        <td class="px-5 py-2.5 text-right">
+                            {% if 'Conforme' in ef.avaliacao %}
+                                <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px]">
+                                    {{ ef.avaliacao }}
+                                </span>
+                            {% elif 'Não Conforme' in ef.avaliacao %}
+                                <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[11px]">
+                                    {{ ef.avaliacao }}
+                                </span>
+                            {% else %}
+                                <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[11px]">
+                                    {{ ef.avaliacao }}
+                                </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Impacto no Rio Piracicaba -->
+    {% if resultado.impactos_rio %}
+    <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-900">Monitoramento do Rio Piracicaba (Montante P3 vs Jusante P4)</h2>
+                <p class="text-[11px] font-mono text-slate-500">Padrões de água doce Classe 2 (CONAMA 357/2005)</p>
+            </div>
+            <span class="font-mono text-xs text-slate-400">Ponto de Lançamento</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-xs font-mono">
+                <thead class="bg-slate-50/80 text-slate-500 uppercase tracking-wider text-[11px]">
+                    <tr>
+                        <th class="px-5 py-2.5 text-left">Mês</th>
+                        <th class="px-5 py-2.5 text-left">Parâmetro</th>
+                        <th class="px-5 py-2.5 text-left">Montante (P3)</th>
+                        <th class="px-5 py-2.5 text-left">Jusante (P4)</th>
+                        <th class="px-5 py-2.5 text-left">Variação (P4 - P3)</th>
+                        <th class="px-5 py-2.5 text-left">Limite Classe 2</th>
+                        <th class="px-5 py-2.5 text-right">Diagnóstico</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                    {% for imp in resultado.impactos_rio %}
+                    <tr class="hover:bg-slate-50/60">
+                        <td class="px-5 py-2.5 font-bold text-slate-900">{{ imp.mes }}</td>
+                        <td class="px-5 py-2.5 font-sans font-medium text-slate-800">{{ imp.parametro }}</td>
+                        <td class="px-5 py-2.5 text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
+                        <td class="px-5 py-2.5 text-slate-600">{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
+                        <td class="px-5 py-2.5 font-semibold {% if imp.diferenca > 0 and imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
+                            {{ '%+0.2f' % imp.diferenca }} {{ imp.unidade }}
+                            <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                        </td>
+                        <td class="px-5 py-2.5 text-slate-500">{{ imp.limite_classe2 }}</td>
+                        <td class="px-5 py-2.5 text-right">
+                            {% if imp.status_rio == 'Normal' %}
+                                <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">Normal</span>
+                            {% elif imp.status_rio == 'Atenção' %}
+                                <span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">Atenção</span>
+                            {% else %}
+                                <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">Impacto</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if imp.alerta_impacto %}
+                    <tr class="bg-amber-50/40">
+                        <td colspan="7" class="px-5 py-2 text-[11px] font-mono text-amber-900">
+                            <strong>Investigação sugerida:</strong> {{ imp.alerta_impacto }}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% elif laudo %}
+    <!-- Visualizacao de Laudo Salvo no Banco -->
+    <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-2xs">
+        <div class="border-b border-slate-100 pb-4 mb-4">
+            <span class="font-mono text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+                {{ laudo.codigo_laudo }}
+            </span>
+            <h2 class="font-serif text-2xl text-blue-900 mt-2">Campanha {{ laudo.campanha_mes }}</h2>
+            <div class="mt-2 text-xs font-mono text-slate-500 space-x-3">
+                <span>Coleta: {{ laudo.data_coleta.strftime('%d/%m/%Y') }}</span>
+                <span>Laboratório: {{ laudo.laboratorio }}</span>
+                <span>Corpo Receptor: {{ laudo.corpo_receptor }}</span>
+            </div>
+        </div>
+
+        {% if alertas %}
+        <div class="mb-5 space-y-2">
+            <h3 class="text-xs font-mono font-bold text-rose-800 uppercase">Alertas</h3>
+            {% for a in alertas %}
+            <div class="bg-rose-50/60 border border-rose-200 rounded p-2.5 text-xs text-rose-900 font-mono">
+                <strong>{{ a.parametro }} (P2):</strong> {{ a.alerta }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <h3 class="text-xs font-mono font-bold text-slate-700 uppercase mb-2">Medições no Efluente Tratado (P2)</h3>
+        <div class="overflow-x-auto border border-slate-200 rounded-lg">
+            <table class="min-w-full divide-y divide-slate-100 text-xs font-mono">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[11px]">
+                    <tr>
+                        <th class="px-4 py-2.5 text-left">Parâmetro</th>
+                        <th class="px-4 py-2.5 text-left">Resultado</th>
+                        <th class="px-4 py-2.5 text-left">Unidade</th>
+                        <th class="px-4 py-2.5 text-right">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                    {% for m in medicoes_p2 %}
+                    <tr class="hover:bg-slate-50/50">
+                        <td class="px-4 py-2.5 font-sans font-medium text-slate-900">{{ m.parametro }}</td>
+                        <td class="px-4 py-2.5 font-bold text-slate-900">{{ m.valor_texto or m.valor_medido }}</td>
+                        <td class="px-4 py-2.5 text-slate-500">{{ m.unidade }}</td>
+                        <td class="px-4 py-2.5 text-right">
+                            {% if m.status_conformidade == 'Conforme' %}
+                                <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">Conforme</span>
+                            {% elif m.status_conformidade == 'Não Conforme' %}
+                                <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px]">Não Conforme</span>
+                            {% else %}
+                                <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[10px]">Informativo</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

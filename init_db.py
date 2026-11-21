@@ -1,25 +1,10 @@
-"""
-Script de Inicialização e Carga Mestra (Seed) do Banco de Dados SQLite.
-
-Por que existe:
-- O banco de dados SQLite ('instance/monitoramento.db') não é versionado no Git.
-  Este script permite que qualquer desenvolvedor ou ambiente de testes recrie
-  instantaneamente toda a estrutura relacional e popule as tabelas mestras
-  com dados normativos reais do projeto.
-- Cadastra os 4 pontos de coleta oficiais (P1 a P4), as 3 legislações ambientais
-  aplicáveis e os 21 parâmetros químicos/físico-químicos com seus limites legais
-  e regras de eficiência.
-"""
+# Cria as tabelas no SQLite local e cadastra as leis e parametros de referencia
 from app import app, db
 from app.models import PontoColeta, Legislacao, LimiteLegal, Laudo, ResultadoAnalise, EficienciaETE
 
 
 def obter_pontos_coleta():
-    """
-    Retorna a lista de pontos padronizados de amostragem (P1, P2, P3 e P4).
-    Cada ponto contém sinônimos para viabilizar o parsing automático de cabeçalhos
-    em arquivos Excel ou relatórios PDF.
-    """
+    # Pontos de amostragem oficiais e sinonimos aceitos nas planilhas
     return [
         PontoColeta(
             codigo="P1",
@@ -53,10 +38,7 @@ def obter_pontos_coleta():
 
 
 def obter_legislacoes():
-    """
-    Retorna o catálogo de legislações ambientais de referência utilizadas para
-    fundamentar os pareceres técnicos e alertas de não conformidade emitidos pelo sistema.
-    """
+    # CONAMA 430/2011, Decreto SP 8.468/1976 e CONAMA 357/2005
     return [
         Legislacao(
             codigo="CONAMA_430_2011",
@@ -86,10 +68,7 @@ def obter_legislacoes():
 
 
 def obter_limites_legais():
-    """
-    Retorna todos os 21 parâmetros químicos e físico-químicos mapeados nos documentos
-    do projeto (Tabela 2: Efluentes P1/P2, Tabela 3: Rio P3/P4 e Tabela 4: Eficiência da ETE).
-    """
+    # 22 parametros quimicos e fisicos com limites legais e regras de eficiencia
     return [
         # 1. pH
         LimiteLegal(
@@ -211,7 +190,7 @@ def obter_limites_legais():
         LimiteLegal(
             parametro="Óleos e Graxas (Minerais)",
             simbolo="O&G",
-            sinonimos="Óleos e Graxas (Minerais)|Oleos e Graxas (Minerais)|Óleos e Graxas|Oleos e Graxas|Óleos Minerais",
+            sinonimos="Óleos e Graxas (Minerais)|Oleos e Graxas (Minerais)|Óleos e Graxas|Oleos e Graxas|Óleos Minerais|Óleos e Graxas Totais|Oleos e Graxas Totais",
             categoria="Óleos e Graxas",
             unidade="mg/L",
             limite_max_conama430=20.0,
@@ -500,17 +479,28 @@ def obter_limites_legais():
             apenas_monitoramento_p2=True,
             observacao_normativa="Monitorado no corpo receptor (Montante P3 vs Jusante P4) para avaliar aporte de nutrientes e risco de eutrofização."
         ),
+        # 22. Turbidez - Específico Corpo Receptor (P3 e P4)
+        LimiteLegal(
+            parametro="Turbidez",
+            simbolo="Turb",
+            sinonimos="Turbidez|Turbidez (UNT)|Turbidez da Água",
+            categoria="Físico-Químico (Corpo Receptor)",
+            unidade="UNT",
+            texto_conama430="Não aplicável",
+            texto_decreto8468="Não aplicável",
+            norma_mais_restritiva="CONAMA 357/2005 (Corpo Receptor)",
+            monitorado_no_rio=True,
+            limite_max_conama357=100.0,
+            texto_conama357="≤ 100 UNT",
+            calcula_eficiencia=False,
+            apenas_monitoramento_p2=True,
+            observacao_normativa="Limite de até 100 UNT em corpos hídricos de água doce Classe 2 (CONAMA nº 357/2005)."
+        ),
     ]
 
 
 def inicializar_banco(recriar=True):
-    """
-    Executa o provisionamento das tabelas e a inserção dos dados mestres na base SQLite.
-
-    Parâmetros:
-    - recriar (bool): Se True, descarta tabelas existentes (db.drop_all) e recria
-      a estrutura do zero, garantindo um estado limpo e consistente para testes.
-    """
+    # Recria as tabelas do zero e insere as normas de referencia
     with app.app_context():
         if recriar:
             db.drop_all()

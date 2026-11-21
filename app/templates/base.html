@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-[#fafbfc]">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Monitoramento de Efluentes - ETE Evonik{% endblock %}</title>
+
+    <!-- Fontes: Newsreader (serif elegante estilo Zed), Inter (sans) e JetBrains Mono (tecnica) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+
+    <!-- Tailwind via CDN Oficial -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Newsreader', 'serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        zed: {
+                            blue: '#1e40af',       /* Azul royal caracteristico do Zed */
+                            sky: '#0284c7',
+                            dark: '#0f172a',
+                            subtle: '#64748b',
+                            border: '#e2e8f0',
+                            card: '#ffffff',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Grade blueprint sutil no fundo */
+        .blueprint-grid {
+            background-size: 28px 28px;
+            background-image: 
+                linear-gradient(to right, rgba(30, 64, 175, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(30, 64, 175, 0.035) 1px, transparent 1px);
+        }
+        /* Marcador de cantoneira técnica (+) */
+        .corner-cross {
+            position: relative;
+        }
+        .corner-cross::before {
+            content: "+";
+            position: absolute;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-full font-sans text-slate-800 antialiased blueprint-grid selection:bg-blue-600 selection:text-white">
+
+    <!-- Barra de Navegacao Estilo Zed -->
+    <header class="border-b border-slate-200/80 bg-white/70 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex justify-between items-center h-14 text-sm">
+            
+            <!-- Logo e Navegacao Primaria -->
+            <div class="flex items-center space-x-6">
+                <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900">
+                    <span class="w-7 h-7 rounded border border-blue-600/30 bg-blue-50/80 text-blue-700 flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
+                        ET
+                    </span>
+                    <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
+                </a>
+
+                <nav class="hidden md:flex items-center space-x-5 text-xs text-slate-600">
+                    <a href="{{ url_for('index') }}" class="hover:text-blue-700 transition-colors">Importação</a>
+                    <span class="text-slate-300">/</span>
+                    <span class="text-slate-500">CONAMA 430</span>
+                    <span class="text-slate-300">/</span>
+                    <span class="text-slate-500">Decreto SP 8.468</span>
+                    <span class="text-slate-300">/</span>
+                    <span class="text-slate-500">CONAMA 357</span>
+                </nav>
+            </div>
+
+            <!-- Controles a Direita com Atalhos em Monospace -->
+            <div class="flex items-center space-x-3 text-xs">
+                <div class="hidden sm:flex items-center px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] space-x-1">
+                    <span>Hackathon 2026</span>
+                    <kbd class="px-1 py-0.5 rounded bg-white border border-slate-200 shadow-2xs">ETEC</kbd>
+                </div>
+
+                <a href="{{ url_for('index') }}"
+                   class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-medium shadow-xs transition-colors">
+                    <span>Nova Análise</span>
+                    <span class="font-mono text-[10px] bg-blue-800/80 px-1 py-0.5 rounded text-blue-100">N</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Avisos Flash -->
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 pt-4 w-full">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="mb-4 p-3.5 rounded-lg border text-xs font-medium flex items-center space-x-2 {% if category == 'error' %}bg-rose-50 border-rose-200 text-rose-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}" role="alert">
+                        <span>{% if category == 'error' %}⚠️{% else %}✓{% endif %}</span>
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Conteudo Principal -->
+    <main class="flex-grow max-w-6xl mx-auto px-4 sm:px-6 py-6 w-full">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Rodape Tecnico -->
+    <footer class="border-t border-slate-200/80 bg-white/50 backdrop-blur-xs mt-auto py-5 text-xs text-slate-500">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div class="flex items-center space-x-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                <span>Sistema ativo: banco SQLite local e validação com pandas</span>
+            </div>
+            <p class="font-mono text-[11px] text-slate-400">Hackathon Evonik + ETEC • Rio Piracicaba</p>
+        </div>
+    </footer>
+
+</body>
+</html>

@@ -1,19 +1,178 @@
-<!--
-Template Jinja2: Página Inicial (index.html)
+{% extends "base.html" %}
 
-Responsabilidade:
-- Interface de entrada do usuário.
-- Apresenta formulário de upload de arquivos (planilhas Excel / relatórios PDF com os laudos da ETE).
-- Fornece instruções sobre o padrão de formato aceito e permite acionar a análise automatizada.
--->
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <title>Monitoramento Ambiental de Efluentes - ETE</title>
-</head>
-<body>
-    <h1>Avaliação de Efluentes e Impacto no Corpo Receptor</h1>
-    <p>Faça o envio da planilha ou laudo de monitoramento para iniciar a avaliação automática de conformidade legal.</p>
-</body>
-</html>
+{% block title %}Monitoramento de Efluentes - ETE Evonik{% endblock %}
+
+{% block content %}
+<div class="space-y-12 py-4">
+
+    <!-- Hero Section Inspirado no Zed -->
+    <div class="text-center relative pt-4 pb-6 max-w-4xl mx-auto">
+        <!-- Titulo em Serif Elegante Azul Royal (The editor for what's next) -->
+        <h1 class="font-serif text-5xl sm:text-6xl text-blue-800 tracking-tight leading-[1.12] mb-4">
+            Avaliador técnico de efluentes
+        </h1>
+
+        <!-- Subtitulo Tecnico -->
+        <p class="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed mb-8">
+            Importação de laudos laboratoriais, cálculo de eficiência da ETE e verificação de conformidade legal no Rio Piracicaba.
+        </p>
+
+        <!-- Botoes de Acao com Indicadores de Atalho -->
+        <div class="flex flex-wrap items-center justify-center gap-3">
+            <label for="arquivo"
+                   class="inline-flex items-center space-x-2 px-5 py-2.5 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-medium text-sm shadow-xs cursor-pointer transition-all hover:-translate-y-0.5">
+                <span>Selecionar planilha Excel</span>
+                <kbd class="font-mono text-xs bg-blue-800/90 text-blue-200 px-1.5 py-0.5 rounded">E</kbd>
+            </label>
+
+            {% if campanhas %}
+            <a href="#historico"
+               class="inline-flex items-center space-x-2 px-4 py-2.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-sm shadow-2xs transition-colors">
+                <span>Ver laudos salvos</span>
+                <kbd class="font-mono text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">H</kbd>
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Linha Descritiva de Compatibilidade -->
+        <p class="text-xs text-slate-400 mt-4 font-mono">
+            Formatos suportados: .xlsx e .xls • Monitoramento mensal P1 a P4
+        </p>
+    </div>
+
+    <!-- Area de Upload com Grade e Moldura Tecnica -->
+    <div class="relative bg-white/90 border border-slate-200 rounded-xl p-6 shadow-sm max-w-3xl mx-auto">
+        
+        <!-- Cantoneiras de alinhamento estilo blueprint -->
+        <div class="absolute -top-1.5 -left-1.5 font-mono text-[11px] text-blue-400 select-none">+</div>
+        <div class="absolute -top-1.5 -right-1.5 font-mono text-[11px] text-blue-400 select-none">+</div>
+        <div class="absolute -bottom-1.5 -left-1.5 font-mono text-[11px] text-blue-400 select-none">+</div>
+        <div class="absolute -bottom-1.5 -right-1.5 font-mono text-[11px] text-blue-400 select-none">+</div>
+
+        <form action="{{ url_for('importar') }}" method="POST" enctype="multipart/form-data">
+            <div class="relative border border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/30 hover:bg-blue-50/60 transition-colors rounded-lg p-8 text-center cursor-pointer group">
+                <input type="file" name="arquivo" id="arquivo" accept=".xlsx, .xls" required
+                       class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                       onchange="document.getElementById('file-chosen-text').textContent = this.files[0] ? this.files[0].name : 'Nenhum arquivo selecionado'">
+
+                <div class="flex flex-col items-center pointer-events-none">
+                    <div class="w-10 h-10 rounded-md border border-blue-200 bg-white flex items-center justify-center font-mono text-blue-700 text-sm mb-2 shadow-2xs">
+                        XLS
+                    </div>
+                    <p class="text-sm font-semibold text-slate-800">
+                        Clique para buscar a planilha ou arraste o arquivo aqui
+                    </p>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                        Lido e validado automaticamente com a biblioteca pandas
+                    </p>
+                    <div id="file-chosen-text" class="mt-3 px-3 py-1 bg-white border border-slate-200 rounded-md text-xs font-mono text-blue-700 shadow-2xs">
+                        Nenhum arquivo selecionado
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between">
+                <span class="text-[11px] font-mono text-slate-400">
+                    Normas: CONAMA 430 (Art. 16) | Decreto 8.468 (Art. 18) | CONAMA 357 (Cl. 2)
+                </span>
+                <button type="submit"
+                        class="inline-flex items-center space-x-1.5 px-4 py-2 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-medium text-xs shadow-xs transition-colors">
+                    <span>Processar Planilha</span>
+                    <span class="font-mono text-[10px] text-blue-200">↵</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Seção de 3 Pilares Técnicos (Inspirado no trio Fast, Intelligent, Collaborative do Zed) -->
+    <div class="border-t border-slate-200/80 pt-8 max-w-5xl mx-auto">
+        <div class="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 border border-slate-200/90 rounded-xl bg-white/70 shadow-2xs overflow-hidden">
+            
+            <!-- Pilar 1: Eficiência da ETE -->
+            <div class="p-6">
+                <div class="flex items-center space-x-2 text-slate-900 font-semibold text-sm mb-2">
+                    <span class="w-5 h-5 rounded-full border border-blue-600 text-blue-700 flex items-center justify-center text-[10px] font-mono">1</span>
+                    <span>Eficiência da ETE</span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed font-mono">
+                    Calcula a remocao de carga poluente entre Bruto (P1) e Tratado (P2) para DBO5,20, DQO e SST.
+                </p>
+            </div>
+
+            <!-- Pilar 2: Conformidade Legal -->
+            <div class="p-6">
+                <div class="flex items-center space-x-2 text-slate-900 font-semibold text-sm mb-2">
+                    <span class="w-5 h-5 rounded-full border border-blue-600 text-blue-700 flex items-center justify-center text-[10px] font-mono">2</span>
+                    <span>Norma Mais Restritiva</span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed font-mono">
+                    Confronta P2 contra CONAMA 430 e Decreto SP 8.468, aplicando o limite mais rigoroso em divergencias.
+                </p>
+            </div>
+
+            <!-- Pilar 3: Corpo Receptor -->
+            <div class="p-6">
+                <div class="flex items-center space-x-2 text-slate-900 font-semibold text-sm mb-2">
+                    <span class="w-5 h-5 rounded-full border border-blue-600 text-blue-700 flex items-center justify-center text-[10px] font-mono">3</span>
+                    <span>Impacto no Rio</span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed font-mono">
+                    Compara Montante (P3) e Jusante (P4) no Rio Piracicaba segundo o CONAMA 357/2005 Classe 2.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabela de Campanhas Gravadas -->
+    {% if campanhas %}
+    <div id="historico" class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden max-w-5xl mx-auto">
+        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-900">Laudos Gravados no Banco</h2>
+                <p class="text-xs text-slate-500 font-mono">Historico mensal persistido no SQLite</p>
+            </div>
+            <span class="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                {{ campanhas|length }} campanhas
+            </span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-xs">
+                <thead class="bg-slate-50/80 text-slate-500 font-mono uppercase tracking-wider text-[11px]">
+                    <tr>
+                        <th class="px-6 py-3 text-left">Código</th>
+                        <th class="px-6 py-3 text-left">Mês / Ano</th>
+                        <th class="px-6 py-3 text-left">Data Coleta</th>
+                        <th class="px-6 py-3 text-left">Laboratório</th>
+                        <th class="px-6 py-3 text-left">Medições</th>
+                        <th class="px-6 py-3 text-right">Ação</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white font-mono">
+                    {% for c in campanhas %}
+                    <tr class="hover:bg-blue-50/30 transition-colors">
+                        <td class="px-6 py-3 font-semibold text-blue-900">{{ c.codigo_laudo }}</td>
+                        <td class="px-6 py-3">
+                            <span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 text-[11px]">
+                                {{ c.campanha_mes }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-3 text-slate-600">{{ c.data_coleta.strftime('%d/%m/%Y') }}</td>
+                        <td class="px-6 py-3 text-slate-600 font-sans">{{ c.laboratorio or 'Laboratório Acreditado' }}</td>
+                        <td class="px-6 py-3 text-slate-600">{{ c.medicoes|length }} registros</td>
+                        <td class="px-6 py-3 text-right">
+                            <a href="{{ url_for('ver_relatorio', codigo_laudo=c.codigo_laudo) }}"
+                               class="text-blue-700 hover:text-blue-900 font-semibold underline underline-offset-2">
+                                Ver Laudo &rarr;
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
