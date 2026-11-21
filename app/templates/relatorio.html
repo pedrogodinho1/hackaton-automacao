@@ -34,8 +34,12 @@
             {% endif %}
 
             <a href="{{ url_for('index') }}"
-               class="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium shadow-2xs transition-colors">
-                <span>&larr; Voltar</span>
+               class="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium shadow-2xs transition-colors group">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 transition-transform group-hover:-translate-x-0.5">
+                    <path d="M6 8L2 12L6 16"/>
+                    <path d="M2 12H22"/>
+                </svg>
+                <span>Voltar</span>
             </a>
         </div>
     </div>
@@ -124,7 +128,7 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                     {% for ef in resultado.eficiencias %}
-                    <tr class="hover:bg-slate-50/60">
+                    <tr>
                         <td class="px-5 py-2.5 font-bold text-slate-900">{{ ef.mes }}</td>
                         <td class="px-5 py-2.5 font-sans font-medium text-slate-800">{{ ef.parametro }}</td>
                         <td class="px-5 py-2.5 text-slate-600">{{ ef.entrada_p1 }} {{ ef.unidade }}</td>
@@ -178,7 +182,7 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                     {% for imp in resultado.impactos_rio %}
-                    <tr class="hover:bg-slate-50/60">
+                    <tr>
                         <td class="px-5 py-2.5 font-bold text-slate-900">{{ imp.mes }}</td>
                         <td class="px-5 py-2.5 font-sans font-medium text-slate-800">{{ imp.parametro }}</td>
                         <td class="px-5 py-2.5 text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
@@ -251,7 +255,7 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                     {% for m in medicoes_p2 %}
-                    <tr class="hover:bg-slate-50/50">
+                    <tr>
                         <td class="px-4 py-2.5 font-sans font-medium text-slate-900">{{ m.parametro }}</td>
                         <td class="px-4 py-2.5 font-bold text-slate-900">{{ m.valor_texto or m.valor_medido }}</td>
                         <td class="px-4 py-2.5 text-slate-500">{{ m.unidade }}</td>

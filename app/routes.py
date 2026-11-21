@@ -35,6 +35,8 @@ def importar():
         resultado = importar_relatorio_excel(arquivo, nome_arquivo=arquivo.filename)
         return render_template('relatorio.html', resultado=resultado)
     except Exception as e:
+        from app import db
+        db.session.rollback()
         flash(f"Nao foi possivel processar a planilha: {e}", "error")
         return redirect(url_for('index'))
 

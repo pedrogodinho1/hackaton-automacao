@@ -297,105 +297,119 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
         'relatorios_por_mes': {}
     }
 
-    # Processa cada mes encontrado na planilha
-    for mes in sorted(df['mes_referencia'].unique()):
-        df_mes = df[df['mes_referencia'] == mes]
-        data_coleta_mes = df_mes['data_coleta'].dropna().iloc[0].date() if not df_mes['data_coleta'].isna().all() else date.today()
-        codigo_campanha = f"CAMP-{mes}"
+    try:
+        # Processa cada mes encontrado na planilha
+        for mes in sorted(df['mes_referencia'].unique()):
+            df_mes = df[df['mes_referencia'] == mes]
+            data_coleta_mes = df_mes['data_coleta'].dropna().iloc[0].date() if not df_mes['data_coleta'].isna().all() else date.today()
+            codigo_campanha = f"CAMP-{mes}"
 
-        # Se ja existir a campanha daquele mes, remove antes de reinserir para evitar duplicatas
-        laudo_existente = Laudo.query.filter_by(codigo_laudo=codigo_campanha).first()
-        if laudo_existente:
-            db.session.delete(laudo_existente)
+            # Se ja existir a campanha daquele mes, remove previamente com commit para garantir a limpeza no SQLite
+            laudos_antigos = Laudo.query.filter_by(codigo_laudo=codigo_campanha).all()
+            if laudos_antigos:
+                ids_antigos = [l.id for l in laudos_antigos]
+                ResultadoAnalise.query.filter(
+                    (ResultadoAnalise.codigo_laudo == codigo_campanha) |
+                    (ResultadoAnalise.laudo_id.in_(ids_antigos))
+                ).delete(synchronize_session=False)
+                EficienciaETE.query.filter(
+                    (EficienciaETE.codigo_laudo == codigo_campanha) |
+                    (EficienciaETE.laudo_id.in_(ids_antigos))
+                ).delete(synchronize_session=False)
+                for l in laudos_antigos:
+                    db.session.delete(l)
+                db.session.commit()
+
+            novo_laudo = Laudo(
+                codigo_laudo=codigo_campanha,
+                unidade_monitorada=metadados['unidade_monitorada'],
+                corpo_receptor=metadados['corpo_receptor'],
+                campanha_mes=mes,
+                data_coleta=data_coleta_mes,
+                laboratorio=metadados['laboratorio'],
+                arquivo_origem=nome_arquivo,
+                observacoes=metadados['observacoes']
+            )
+            db.session.add(novo_laudo)
             db.session.flush()
 
-        novo_laudo = Laudo(
-            codigo_laudo=codigo_campanha,
-            unidade_monitorada=metadados['unidade_monitorada'],
-            corpo_receptor=metadados['corpo_receptor'],
-            campanha_mes=mes,
-            data_coleta=data_coleta_mes,
-            laboratorio=metadados['laboratorio'],
-            arquivo_origem=nome_arquivo,
-            observacoes=metadados['observacoes']
-        )
-        db.session.add(novo_laudo)
-        db.session.flush()
+            medicoes_mes = []
+            alertas_mes = []
 
-        medicoes_mes = []
-        alertas_mes = []
+            for _, row in df_mes.iterrows():
+                nome_param = str(row['parametro']).strip()
+                ponto = str(row['codigo_ponto']).strip().upper()
+                val_num = row['resultado_num']
+                val_txt = row['resultado_txt']
+                unidade = str(row['unidade']).strip()
 
-        for _, row in df_mes.iterrows():
-            nome_param = str(row['parametro']).strip()
-            ponto = str(row['codigo_ponto']).strip().upper()
-            val_num = row['resultado_num']
-            val_txt = row['resultado_txt']
-            unidade = str(row['unidade']).strip()
+                regra_param = LimiteLegal.buscar_por_nome(nome_param)
 
-            regra_param = LimiteLegal.buscar_por_nome(nome_param)
+                status_conf = "Informativo"
+                em_conf = None
+                norma_violada = None
+                alerta_texto = None
 
-            status_conf = "Informativo"
-            em_conf = None
-            norma_violada = None
-            alerta_texto = None
+                # Avalia limites no Efluente Tratado (P2)
+                if ponto == 'P2' and regra_param:
+                    avaliacao = regra_param.avaliar_p2(val_num)
+                    status_conf = avaliacao['status_conformidade']
+                    em_conf = avaliacao['em_conformidade']
+                    norma_violada = avaliacao['norma_violada']
+                    alerta_texto = avaliacao['alerta']
 
-            # Avalia limites no Efluente Tratado (P2)
-            if ponto == 'P2' and regra_param:
-                avaliacao = regra_param.avaliar_p2(val_num)
-                status_conf = avaliacao['status_conformidade']
-                em_conf = avaliacao['em_conformidade']
-                norma_violada = avaliacao['norma_violada']
-                alerta_texto = avaliacao['alerta']
+                    if status_conf == "Não Conforme":
+                        alertas_mes.append({
+                            'mes': mes,
+                            'ponto': ponto,
+                            'parametro': regra_param.parametro,
+                            'valor': val_num,
+                            'unidade': unidade,
+                            'norma_violada': norma_violada,
+                            'mensagem': alerta_texto
+                        })
 
-                if status_conf == "Não Conforme":
-                    alertas_mes.append({
-                        'mes': mes,
-                        'ponto': ponto,
-                        'parametro': regra_param.parametro,
-                        'valor': val_num,
-                        'unidade': unidade,
-                        'norma_violada': norma_violada,
-                        'mensagem': alerta_texto
-                    })
+                medicao = ResultadoAnalise(
+                    laudo_id=novo_laudo.id,
+                    codigo_laudo=codigo_campanha,
+                    data_coleta=data_coleta_mes,
+                    ponto_coleta=ponto,
+                    parametro_id=regra_param.id if regra_param else None,
+                    parametro=regra_param.parametro if regra_param else nome_param,
+                    valor_medido=val_num,
+                    valor_texto=val_txt,
+                    unidade=unidade,
+                    status_conformidade=status_conf,
+                    em_conformidade=em_conf,
+                    norma_violada=norma_violada,
+                    alerta=alerta_texto
+                )
+                db.session.add(medicao)
+                medicoes_mes.append(medicao)
 
-            medicao = ResultadoAnalise(
-                laudo_id=novo_laudo.id,
-                codigo_laudo=codigo_campanha,
-                data_coleta=data_coleta_mes,
-                ponto_coleta=ponto,
-                parametro_id=regra_param.id if regra_param else None,
-                parametro=regra_param.parametro if regra_param else nome_param,
-                valor_medido=val_num,
-                valor_texto=val_txt,
-                unidade=unidade,
-                status_conformidade=status_conf,
-                em_conformidade=em_conf,
-                norma_violada=norma_violada,
-                alerta=alerta_texto
-            )
-            db.session.add(medicao)
-            medicoes_mes.append(medicao)
+            eficiencias_mes = calcular_eficiencias_campanha(df_mes, novo_laudo.id, codigo_campanha, data_coleta_mes)
+            impactos_rio_mes = avaliar_impacto_corpo_receptor(df_mes)
 
-        eficiencias_mes = calcular_eficiencias_campanha(df_mes, novo_laudo.id, codigo_campanha, data_coleta_mes)
-        impactos_rio_mes = avaliar_impacto_corpo_receptor(df_mes)
+            resultado_processamento['campanhas_processadas'].append(mes)
+            resultado_processamento['total_alertas'] += len(alertas_mes)
+            resultado_processamento['alertas'].extend(alertas_mes)
+            resultado_processamento['eficiencias'].extend([{**e, 'mes': mes} for e in eficiencias_mes])
+            resultado_processamento['impactos_rio'].extend([{**i, 'mes': mes} for i in impactos_rio_mes])
 
-        resultado_processamento['campanhas_processadas'].append(mes)
-        resultado_processamento['total_alertas'] += len(alertas_mes)
-        resultado_processamento['alertas'].extend(alertas_mes)
-        resultado_processamento['eficiencias'].extend([{**e, 'mes': mes} for e in eficiencias_mes])
-        resultado_processamento['impactos_rio'].extend([{**i, 'mes': mes} for i in impactos_rio_mes])
+            resultado_processamento['relatorios_por_mes'][mes] = {
+                'codigo_laudo': codigo_campanha,
+                'data_coleta': data_coleta_mes.strftime('%d/%m/%Y'),
+                'total_medicoes': len(medicoes_mes),
+                'alertas': alertas_mes,
+                'eficiencias': eficiencias_mes,
+                'impactos_rio': impactos_rio_mes
+            }
 
-        resultado_processamento['relatorios_por_mes'][mes] = {
-            'codigo_laudo': codigo_campanha,
-            'data_coleta': data_coleta_mes.strftime('%d/%m/%Y'),
-            'total_medicoes': len(medicoes_mes),
-            'alertas': alertas_mes,
-            'eficiencias': eficiencias_mes,
-            'impactos_rio': impactos_rio_mes
-        }
-
-    db.session.commit()
-    return resultado_processamento
+        db.session.commit()
+        return resultado_processamento
+    except Exception as e:
+        db.session.rollback()
+        raise e
 
 
 def obter_contexto_relatorio(codigo_laudo: str) -> dict:
