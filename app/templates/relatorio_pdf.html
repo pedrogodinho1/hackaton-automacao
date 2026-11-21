@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório de Conformidade Ambiental - {{ laudo.codigo_laudo }}</title>
+    <style>
+        @page {
+            size: a4 portrait;
+            margin: 1.5cm 1.2cm 1.5cm 1.2cm;
+            @bottom-left {
+                content: "Sistema de Avaliação Ambiental • ETE Evonik";
+                font-family: Helvetica, Arial, sans-serif;
+                font-size: 8pt;
+                color: #64748b;
+            }
+            @bottom-right {
+                content: "Página " counter(page) " de " counter(pages);
+                font-family: Helvetica, Arial, sans-serif;
+                font-size: 8pt;
+                color: #64748b;
+            }
+        }
+
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            font-size: 9pt;
+            line-height: 1.35;
+        }
+
+        /* Cabecalho Principal */
+        .header-table {
+            width: 100%;
+            border-bottom: 2px solid #971E84;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+
+        .title {
+            font-size: 15pt;
+            font-weight: bold;
+            color: #971E84;
+            margin: 0;
+            padding: 0;
+        }
+
+        .subtitle {
+            font-size: 8.5pt;
+            color: #64748b;
+            margin: 2px 0 0 0;
+        }
+
+        /* Blocos e Secoes */
+        .section-title {
+            font-size: 10.5pt;
+            font-weight: bold;
+            color: #0f172a;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 3px;
+            margin-top: 14px;
+            margin-bottom: 6px;
+        }
+
+        /* Tabela de Metadados */
+        .meta-table {
+            width: 100%;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 10px;
+        }
+
+        .meta-table td {
+            padding: 4px 8px;
+            font-size: 8.5pt;
+        }
+
+        .meta-label {
+            font-weight: bold;
+            color: #475569;
+            width: 18%;
+        }
+
+        .meta-val {
+            color: #0f172a;
+            width: 32%;
+        }
+
+        /* Tabelas de Dados */
+        .data-table {
+            width: 100%;
+            margin-top: 4px;
+            margin-bottom: 8px;
+        }
+
+        .data-table th {
+            background-color: #f1f5f9;
+            color: #334155;
+            font-size: 8pt;
+            font-weight: bold;
+            text-align: left;
+            padding: 5px 6px;
+            border-top: 1px solid #cbd5e1;
+            border-bottom: 1px solid #cbd5e1;
+        }
+
+        .data-table td {
+            font-size: 8pt;
+            padding: 4px 6px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        /* Alertas e Destaques */
+        .alert-box {
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            border-left: 4px solid #dc2626;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+        }
+
+        .alert-title {
+            font-size: 9pt;
+            font-weight: bold;
+            color: #991b1b;
+            margin: 0 0 4px 0;
+        }
+
+        .alert-item {
+            font-size: 8pt;
+            color: #7f1d1d;
+            margin-bottom: 3px;
+        }
+
+        /* Badges de Status */
+        .badge-conforme {
+            color: #166534;
+            font-weight: bold;
+        }
+
+        .badge-nao-conforme {
+            color: #b91c1c;
+            font-weight: bold;
+            background-color: #fee2e2;
+            padding: 1px 4px;
+        }
+
+        .badge-info {
+            color: #971E84;
+            font-weight: normal;
+        }
+
+        .row-violacao {
+            background-color: #fff1f2;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .footer-note {
+            font-size: 7.5pt;
+            color: #94a3b8;
+            margin-top: 16px;
+            text-align: center;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 6px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Cabecalho Institucional -->
+    <table class="header-table" cellpadding="0" cellspacing="0">
+        <tr>
+            <td>
+                <div class="title">RELATÓRIO TÉCNICO DE CONFORMIDADE AMBIENTAL</div>
+                <div class="subtitle">
+                    Avaliação de Efluentes Líquidos (ETE) e Impacto no Corpo Receptor (Rio Piracicaba)
+                </div>
+            </td>
+            <td class="text-right" style="vertical-align: bottom;">
+                <div style="font-size: 8pt; color: #64748b;">
+                    Emissão: <strong>{{ data_emissao }}</strong>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Metadados da Campanha -->
+    <table class="meta-table" cellpadding="0" cellspacing="0">
+        <tr>
+            <td class="meta-label">Código do Laudo:</td>
+            <td class="meta-val"><strong>{{ laudo.codigo_laudo }}</strong></td>
+            <td class="meta-label">Mês Referência:</td>
+            <td class="meta-val"><strong>{{ laudo.campanha_mes }}</strong></td>
+        </tr>
+        <tr>
+            <td class="meta-label">Data da Coleta:</td>
+            <td class="meta-val">{{ laudo.data_coleta.strftime('%d/%m/%Y') }}</td>
+            <td class="meta-label">Laboratório:</td>
+            <td class="meta-val">{{ laudo.laboratorio or 'Laboratório Acreditado' }}</td>
+        </tr>
+        <tr>
+            <td class="meta-label">Unidade:</td>
+            <td class="meta-val">{{ laudo.unidade_monitorada or 'ETE Industrial' }}</td>
+            <td class="meta-label">Corpo Receptor:</td>
+            <td class="meta-val">{{ laudo.corpo_receptor or 'Rio Piracicaba (Classe 2)' }}</td>
+        </tr>
+    </table>
+
+    <!-- 1. Alertas de Nao Conformidade -->
+    {% if alertas %}
+    <div class="alert-box">
+        <div class="alert-title">⚠️ ALERTAS DE NÃO CONFORMIDADE DETECTADOS (P2 - EFLUENTE TRATADO)</div>
+        {% for a in alertas %}
+        <div class="alert-item">
+            • <strong>{{ a.parametro }}:</strong> {{ a.alerta }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- 2. Eficiencia de Remocao da ETE -->
+    {% if eficiencias %}
+    <div class="section-title">1. Eficiência de Tratamento da ETE (P1 Bruto vs P2 Tratado)</div>
+    <table class="data-table" cellpadding="0" cellspacing="0">
+        <thead>
+            <tr>
+                <th style="width: 28%;">Parâmetro</th>
+                <th style="width: 18%;">Entrada P1 (Bruto)</th>
+                <th style="width: 18%;">Saída P2 (Tratado)</th>
+                <th style="width: 16%;">Eficiência (%)</th>
+                <th style="width: 20%;" class="text-right">Avaliação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ef in eficiencias %}
+            <tr>
+                <td><strong>{{ ef.parametro }}</strong></td>
+                <td>{{ "%.1f"|format(ef.entrada_p1) }} {{ ef.unidade }}</td>
+                <td>{{ "%.1f"|format(ef.saida_p2) }} {{ ef.unidade }}</td>
+                <td><strong>{{ "%.1f"|format(ef.eficiencia_percentual) }}%</strong></td>
+                <td class="text-right">
+                    {% if 'Conforme' in ef.avaliacao %}
+                        <span class="badge-conforme">{{ ef.avaliacao }}</span>
+                    {% else %}
+                        <span class="badge-info">{{ ef.avaliacao }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- 3. Avaliacao do Corpo Receptor -->
+    {% if impactos_rio %}
+    <div class="section-title">2. Avaliação do Corpo Receptor: Rio Piracicaba (P3 Montante vs P4 Jusante)</div>
+    <table class="data-table" cellpadding="0" cellspacing="0">
+        <thead>
+            <tr>
+                <th style="width: 25%;">Parâmetro</th>
+                <th style="width: 15%;">Montante (P3)</th>
+                <th style="width: 15%;">Jusante (P4)</th>
+                <th style="width: 15%;">Variação</th>
+                <th style="width: 15%;">Limite Classe 2</th>
+                <th style="width: 15%;" class="text-right">Diagnóstico</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for imp in impactos_rio %}
+            <tr {% if imp.status_rio != 'Normal' %}class="row-violacao"{% endif %}>
+                <td>{{ imp.parametro }}</td>
+                <td>{{ imp.montante_p3 }} {{ imp.unidade }}</td>
+                <td>{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
+                <td>
+                    {{ "%+0.2f"|format(imp.diferenca) }}
+                    <small>({{ "%+0.1f"|format(imp.variacao_pct) }}%)</small>
+                </td>
+                <td>{{ imp.limite_classe2 }}</td>
+                <td class="text-right">
+                    {% if imp.status_rio == 'Normal' %}
+                        <span class="badge-conforme">Normal</span>
+                    {% elif imp.status_rio == 'Atenção' %}
+                        <span style="color: #b45309; font-weight: bold;">Atenção</span>
+                    {% else %}
+                        <span class="badge-nao-conforme">Impacto</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if imp.alerta_impacto %}
+            <tr style="background-color: #fffbeb;">
+                <td colspan="6" style="padding: 4px 8px; font-size: 7.5pt; color: #92400e;">
+                    ↳ <strong>Aviso:</strong> {{ imp.alerta_impacto }}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- 4. Medicoes Detalhadas no Efluente Tratado (P2) -->
+    <div class="section-title">3. Resultados Analíticos no Efluente Tratado (Ponto P2)</div>
+    <table class="data-table" cellpadding="0" cellspacing="0">
+        <thead>
+            <tr>
+                <th style="width: 32%;">Parâmetro Químico / Físico</th>
+                <th style="width: 20%;">Resultado Medido</th>
+                <th style="width: 16%;">Unidade</th>
+                <th style="width: 32%;" class="text-right">Situação Legal</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in medicoes_p2 %}
+            <tr {% if m.status_conformidade == 'Não Conforme' %}class="row-violacao"{% endif %}>
+                <td><strong>{{ m.parametro }}</strong></td>
+                <td>{{ m.valor_texto or m.valor_medido }}</td>
+                <td>{{ m.unidade }}</td>
+                <td class="text-right">
+                    {% if m.status_conformidade == 'Conforme' %}
+                        <span class="badge-conforme">Conforme</span>
+                    {% elif m.status_conformidade == 'Não Conforme' %}
+                        <span class="badge-nao-conforme">NÃO CONFORME</span>
+                    {% else %}
+                        <span class="badge-info">Informativo</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Rodape do Laudo -->
+    <div class="footer-note">
+        Legislações aplicadas: Resolução CONAMA nº 430/2011 (Art. 16), Decreto Estadual SP nº 8.468/1976 (Art. 18) e CONAMA nº 357/2005 (Classe 2).<br>
+        Documento gerado eletronicamente em memória sem gravação temporária em disco.
+    </div>
+
+</body>
+</html>

@@ -8,21 +8,34 @@
     <!-- Cabecalho do Relatorio -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white/80 border border-slate-200 rounded-xl p-6 shadow-2xs backdrop-blur-xs">
         <div>
-            <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded border border-blue-200 bg-blue-50/60 text-blue-800 text-[11px] font-mono mb-2">
+            <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded border border-[#971E84]/30 bg-[#971E84]/10 text-[#971E84] text-[11px] font-mono mb-2">
                 <span>LAUDO TÉCNICO DE CONFORMIDADE</span>
             </div>
-            <h1 class="font-serif text-3xl sm:text-4xl text-blue-900 tracking-tight">
+            <h1 class="font-serif text-3xl sm:text-4xl text-[#971E84] tracking-tight">
                 Parecer de Efluentes & Rio Piracicaba
             </h1>
             <p class="text-xs text-slate-500 font-mono mt-1">
                 Confronto: CONAMA 430/2011 • Decreto Estadual SP 8.468/1976 • CONAMA 357/2005 Classe 2
             </p>
         </div>
-        <div>
+        <div class="flex flex-wrap items-center gap-2">
+            {% if laudo %}
+                <a href="{{ url_for('baixar_relatorio_pdf', codigo_laudo=laudo.codigo_laudo) }}"
+                   class="inline-flex items-center px-4 py-2 rounded-md bg-[#971E84] hover:bg-[#7e186e] text-white text-xs font-semibold shadow-xs transition-all hover:-translate-y-0.5">
+                    <span>Baixar Relatório (PDF)</span>
+                </a>
+            {% elif resultado and resultado.campanhas_processadas %}
+                {% for mes in resultado.campanhas_processadas %}
+                    <a href="{{ url_for('baixar_relatorio_pdf', codigo_laudo='CAMP-' + mes) }}"
+                       class="inline-flex items-center px-3 py-1.5 rounded-md bg-[#971E84] hover:bg-[#7e186e] text-white text-xs font-semibold shadow-xs transition-colors">
+                        <span>Baixar PDF ({{ mes }})</span>
+                    </a>
+                {% endfor %}
+            {% endif %}
+
             <a href="{{ url_for('index') }}"
                class="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium shadow-2xs transition-colors">
-                <span>&larr; Novo Envio</span>
-                <kbd class="font-mono text-[10px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded border border-slate-200">Esc</kbd>
+                <span>&larr; Voltar</span>
             </a>
         </div>
     </div>
@@ -52,7 +65,7 @@
 
         <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
             <span class="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Eficiências</span>
-            <div class="text-2xl font-mono font-bold text-blue-700 mt-1">{{ resultado.eficiencias|length }}</div>
+            <div class="text-2xl font-mono font-bold text-[#971E84] mt-1">{{ resultado.eficiencias|length }}</div>
             <span class="text-[11px] text-slate-500 font-mono">taxas de remoção</span>
         </div>
     </div>
@@ -95,7 +108,7 @@
                 <h2 class="text-sm font-semibold text-slate-900">Eficiência de Tratamento da ETE (P1 Bruto vs P2 Tratado)</h2>
                 <p class="text-[11px] font-mono text-slate-500">Fórmula: ((P1 - P2) / P1) * 100</p>
             </div>
-            <span class="font-mono text-xs text-blue-700">Meta DBO >= 60%</span>
+            <span class="font-mono text-xs text-[#971E84]">Meta DBO >= 60%</span>
         </div>
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-slate-100 text-xs font-mono">
@@ -116,7 +129,7 @@
                         <td class="px-5 py-2.5 font-sans font-medium text-slate-800">{{ ef.parametro }}</td>
                         <td class="px-5 py-2.5 text-slate-600">{{ ef.entrada_p1 }} {{ ef.unidade }}</td>
                         <td class="px-5 py-2.5 text-slate-600">{{ ef.saida_p2 }} {{ ef.unidade }}</td>
-                        <td class="px-5 py-2.5 text-sm font-bold text-blue-800">{{ ef.eficiencia_pct }}%</td>
+                        <td class="px-5 py-2.5 text-sm font-bold text-[#971E84]">{{ ef.eficiencia_pct }}%</td>
                         <td class="px-5 py-2.5 text-right">
                             {% if 'Conforme' in ef.avaliacao %}
                                 <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px]">
@@ -203,10 +216,10 @@
     <!-- Visualizacao de Laudo Salvo no Banco -->
     <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-2xs">
         <div class="border-b border-slate-100 pb-4 mb-4">
-            <span class="font-mono text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+            <span class="font-mono text-xs px-2 py-0.5 rounded bg-[#971E84]/10 text-[#971E84] border border-[#971E84]/20">
                 {{ laudo.codigo_laudo }}
             </span>
-            <h2 class="font-serif text-2xl text-blue-900 mt-2">Campanha {{ laudo.campanha_mes }}</h2>
+            <h2 class="font-serif text-2xl text-[#971E84] mt-2">Campanha {{ laudo.campanha_mes }}</h2>
             <div class="mt-2 text-xs font-mono text-slate-500 space-x-3">
                 <span>Coleta: {{ laudo.data_coleta.strftime('%d/%m/%Y') }}</span>
                 <span>Laboratório: {{ laudo.laboratorio }}</span>

@@ -22,9 +22,15 @@
                         mono: ['JetBrains Mono', 'monospace'],
                     },
                     colors: {
+                        evonik: {
+                            DEFAULT: '#971E84',
+                            hover: '#7e186e',
+                            light: '#fdf4fa',
+                            border: '#f5c6ea',
+                        },
                         zed: {
-                            blue: '#1e40af',       /* Azul royal caracteristico do Zed */
-                            sky: '#0284c7',
+                            blue: '#971E84',       /* Tom Evonik */
+                            sky: '#b832a2',
                             dark: '#0f172a',
                             subtle: '#64748b',
                             border: '#e2e8f0',
@@ -37,12 +43,12 @@
     </script>
 
     <style>
-        /* Grade blueprint sutil no fundo */
+        /* Grade blueprint sutil no fundo com tom Evonik */
         .blueprint-grid {
             background-size: 28px 28px;
             background-image: 
-                linear-gradient(to right, rgba(30, 64, 175, 0.035) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(30, 64, 175, 0.035) 1px, transparent 1px);
+                linear-gradient(to right, rgba(151, 30, 132, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(151, 30, 132, 0.035) 1px, transparent 1px);
         }
         /* Marcador de cantoneira técnica (+) */
         .corner-cross {
@@ -57,45 +63,25 @@
         }
     </style>
 </head>
-<body class="flex flex-col min-h-full font-sans text-slate-800 antialiased blueprint-grid selection:bg-blue-600 selection:text-white">
+<body class="flex flex-col min-h-full font-sans text-slate-800 antialiased blueprint-grid selection:bg-[#971E84] selection:text-white">
 
     <!-- Barra de Navegacao Estilo Zed -->
     <header class="border-b border-slate-200/80 bg-white/70 backdrop-blur-md sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex justify-between items-center h-14 text-sm">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center space-x-4 h-14 text-sm">
             
-            <!-- Logo e Navegacao Primaria -->
-            <div class="flex items-center space-x-6">
-                <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900">
-                    <span class="w-7 h-7 rounded border border-blue-600/30 bg-blue-50/80 text-blue-700 flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
-                        ET
-                    </span>
-                    <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
-                </a>
+            <!-- Logo e Identificação -->
+            <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900 hover:text-[#971E84] transition-colors">
+                <span class="w-7 h-7 rounded border border-[#971E84]/30 bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
+                    ET
+                </span>
+                <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
+            </a>
 
-                <nav class="hidden md:flex items-center space-x-5 text-xs text-slate-600">
-                    <a href="{{ url_for('index') }}" class="hover:text-blue-700 transition-colors">Importação</a>
-                    <span class="text-slate-300">/</span>
-                    <span class="text-slate-500">CONAMA 430</span>
-                    <span class="text-slate-300">/</span>
-                    <span class="text-slate-500">Decreto SP 8.468</span>
-                    <span class="text-slate-300">/</span>
-                    <span class="text-slate-500">CONAMA 357</span>
-                </nav>
-            </div>
-
-            <!-- Controles a Direita com Atalhos em Monospace -->
-            <div class="flex items-center space-x-3 text-xs">
-                <div class="hidden sm:flex items-center px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-500 font-mono text-[11px] space-x-1">
-                    <span>Hackathon 2026</span>
-                    <kbd class="px-1 py-0.5 rounded bg-white border border-slate-200 shadow-2xs">ETEC</kbd>
-                </div>
-
-                <a href="{{ url_for('index') }}"
-                   class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-medium shadow-xs transition-colors">
-                    <span>Nova Análise</span>
-                    <span class="font-mono text-[10px] bg-blue-800/80 px-1 py-0.5 rounded text-blue-100">N</span>
-                </a>
-            </div>
+            <!-- Botão de Ação -->
+            <a href="{{ url_for('index') }}"
+               class="inline-flex items-center px-3 py-1.5 rounded-md bg-[#971E84] hover:bg-[#7e186e] text-white font-medium text-xs shadow-xs transition-colors">
+                <span>Nova Análise</span>
+            </a>
         </div>
     </header>
 

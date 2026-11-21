@@ -1,7 +1,10 @@
+import io
 import re
 from datetime import datetime, date
 from decimal import Decimal, ROUND_HALF_UP
+from flask import render_template
 import pandas as pd
+from xhtml2pdf import pisa
 from app import db
 from app.models import (
     Laudo,
@@ -393,3 +396,96 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
 
     db.session.commit()
     return resultado_processamento
+
+
+def obter_contexto_relatorio(codigo_laudo: str) -> dict:
+    """
+    Recupera os dados completos de uma campanha mensal gravada no banco de dados.
+    Reaproveitado tanto para a tela HTML quanto para a geracao do relatorio em PDF.
+    """
+    laudo = Laudo.query.filter_by(codigo_laudo=codigo_laudo).first_or_404()
+    medicoes_p2 = [m for m in laudo.medicoes if m.ponto_coleta == 'P2']
+    medicoes_p3 = [m for m in laudo.medicoes if m.ponto_coleta == 'P3']
+    medicoes_p4 = [m for m in laudo.medicoes if m.ponto_coleta == 'P4']
+    alertas = [m for m in laudo.medicoes if m.status_conformidade == 'Não Conforme']
+
+    # Monta o comparativo de qualidade do Rio Piracicaba (P3 vs P4)
+    impactos_rio = []
+    p3_map = {m.parametro: m for m in medicoes_p3}
+    p4_map = {m.parametro: m for m in medicoes_p4}
+    p2_map = {m.parametro: m for m in medicoes_p2}
+
+    for param_nome, m3 in p3_map.items():
+        if param_nome in p4_map:
+            m4 = p4_map[param_nome]
+            v3 = m3.valor_medido or 0.0
+            v4 = m4.valor_medido or 0.0
+            delta = round(v4 - v3, 3)
+            var_pct = round(((v4 - v3) / v3) * 100.0, 1) if v3 > 0 else 0.0
+
+            regra = m4.limite_ref or LimiteLegal.buscar_por_nome(param_nome)
+            status_rio = "Normal"
+            alerta_impacto = None
+
+            if regra and regra.limite_max_conama357 is not None and v4 > regra.limite_max_conama357:
+                status_rio = "Alerta de Impacto"
+                alerta_impacto = (
+                    f"Concentração em Jusante (P4 = {v4} {m4.unidade}) ultrapassou o limite "
+                    f"do CONAMA 357/2005 Classe 2 (<= {regra.limite_max_conama357} {m4.unidade}). "
+                    f"Elevação de +{delta} {m4.unidade} ({var_pct:+.1f}%) em relação a Montante (P3 = {v3} {m3.unidade})."
+                )
+            elif delta > 0 and param_nome in p2_map:
+                m2 = p2_map[param_nome]
+                v2 = m2.valor_medido or 0.0
+                if var_pct >= 20.0:
+                    status_rio = "Atenção"
+                    alerta_impacto = (
+                        f"Elevação de {var_pct:+.1f}% no rio após o lançamento "
+                        f"(P3 = {v3} -> P4 = {v4} {m4.unidade}). Concentração no Tratado (P2 = {v2} {m2.unidade}). "
+                        f"Recomenda-se investigar a contribuição da ETE."
+                    )
+
+            impactos_rio.append({
+                'parametro': param_nome,
+                'montante_p3': v3,
+                'jusante_p4': v4,
+                'diferenca': delta,
+                'variacao_pct': var_pct,
+                'unidade': m4.unidade,
+                'status_rio': status_rio,
+                'alerta_impacto': alerta_impacto,
+                'limite_classe2': regra.texto_conama357 if regra else 'Não tabelado'
+            })
+
+    return {
+        'laudo': laudo,
+        'medicoes_p2': medicoes_p2,
+        'eficiencias': laudo.eficiencias,
+        'alertas': alertas,
+        'impactos_rio': impactos_rio,
+        'data_emissao': datetime.now().strftime('%d/%m/%Y às %H:%M')
+    }
+
+
+def gerar_pdf_relatorio(dados_contexto: dict) -> io.BytesIO:
+    """
+    Renderiza o template HTML dedicado (relatorio_pdf.html) e converte em PDF usando xhtml2pdf.
+    Retorna um buffer em memoria io.BytesIO posicionado no inicio (seek 0), sem salvar arquivo no disco.
+    Pronto para send_file no Flask ou anexo em disparos de e-mail.
+    """
+    html_conteudo = render_template('relatorio_pdf.html', **dados_contexto)
+    # Substitui caracteres que nao existem nas fontes core do xhtml2pdf (Helvetica)
+    html_conteudo = html_conteudo.replace('≥', '>=').replace('≤', '<=').replace('•', '-')
+    pdf_buffer = io.BytesIO()
+
+    pisa_status = pisa.CreatePDF(
+        src=html_conteudo,
+        dest=pdf_buffer,
+        encoding='utf-8'
+    )
+
+    if pisa_status.err:
+        raise RuntimeError(f"Ocorreu um erro ao gerar o PDF com xhtml2pdf (código de erro: {pisa_status.err})")
+
+    pdf_buffer.seek(0)
+    return pdf_buffer

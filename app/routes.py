@@ -1,7 +1,11 @@
-from flask import render_template, request, redirect, url_for, flash
-from app import app, db
-from app.models import Laudo, ResultadoAnalise, EficienciaETE
-from app.services import importar_relatorio_excel
+from flask import render_template, request, redirect, url_for, flash, send_file
+from app import app
+from app.models import Laudo
+from app.services import (
+    importar_relatorio_excel,
+    obter_contexto_relatorio,
+    gerar_pdf_relatorio,
+)
 
 
 @app.route('/')
@@ -37,17 +41,27 @@ def importar():
 
 @app.route('/relatorio/<codigo_laudo>')
 def ver_relatorio(codigo_laudo):
-    # Abre o relatorio de uma campanha que ja esta gravada no banco
-    laudo = Laudo.query.filter_by(codigo_laudo=codigo_laudo).first_or_404()
-    medicoes_p2 = [m for m in laudo.medicoes if m.ponto_coleta == 'P2']
-    medicoes_rio = [m for m in laudo.medicoes if m.ponto_coleta in ('P3', 'P4')]
-    alertas = [m for m in laudo.medicoes if m.status_conformidade == 'Não Conforme']
+    # Exibe na interface HTML a campanha salva no banco
+    contexto = obter_contexto_relatorio(codigo_laudo)
+    return render_template('relatorio.html', **contexto)
 
-    return render_template(
-        'relatorio.html',
-        laudo=laudo,
-        medicoes_p2=medicoes_p2,
-        medicoes_rio=medicoes_rio,
-        eficiencias=laudo.eficiencias,
-        alertas=alertas
-    )
+
+@app.route('/relatorio/<codigo_laudo>/pdf')
+def baixar_relatorio_pdf(codigo_laudo):
+    # Gera o PDF em memoria via xhtml2pdf e entrega como download (attachment)
+    try:
+        contexto = obter_contexto_relatorio(codigo_laudo)
+        pdf_buffer = gerar_pdf_relatorio(contexto)
+
+        data_str = contexto['laudo'].data_coleta.strftime('%Y%m%d')
+        nome_arquivo = f"relatorio_efluentes_{codigo_laudo}_{data_str}.pdf"
+
+        return send_file(
+            pdf_buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=nome_arquivo
+        )
+    except Exception as e:
+        flash(f"Erro ao gerar o arquivo PDF: {e}", "error")
+        return redirect(url_for('ver_relatorio', codigo_laudo=codigo_laudo))
