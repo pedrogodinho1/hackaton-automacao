@@ -5,36 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Monitoramento de Efluentes - ETE Evonik{% endblock %}</title>
 
-    <!-- Fontes: Newsreader (serif elegante estilo Zed), Inter (sans) e JetBrains Mono (tecnica) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- Tailwind via CDN Oficial -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        serif: ['Newsreader', 'serif'],
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
                         mono: ['JetBrains Mono', 'monospace'],
                     },
                     colors: {
                         evonik: {
                             DEFAULT: '#971E84',
                             hover: '#7e186e',
-                            light: '#fdf4fa',
-                            border: '#f5c6ea',
-                        },
-                        zed: {
-                            blue: '#971E84',       /* Tom Evonik */
-                            sky: '#b832a2',
-                            dark: '#0f172a',
-                            subtle: '#64748b',
-                            border: '#e2e8f0',
-                            card: '#ffffff',
+                            dark: '#601053',
+                            tint: '#fdf5fb',
+                            border: '#f2cbe9',
                         }
                     }
                 }
@@ -42,64 +32,65 @@
         }
     </script>
 
-    <style>
-        /* Grade blueprint sutil no fundo com tom Evonik */
-        .blueprint-grid {
-            background-size: 28px 28px;
-            background-image: 
-                linear-gradient(to right, rgba(151, 30, 132, 0.035) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(151, 30, 132, 0.035) 1px, transparent 1px);
-        }
-        /* Marcador de cantoneira técnica (+) */
-        .corner-cross {
-            position: relative;
-        }
-        .corner-cross::before {
-            content: "+";
-            position: absolute;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            color: #94a3b8;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body class="flex flex-col min-h-full font-sans text-slate-800 antialiased blueprint-grid selection:bg-[#971E84] selection:text-white">
 
-    <!-- Barra de Navegacao Estilo Zed -->
-    <header class="border-b border-slate-200/80 bg-white/70 backdrop-blur-md sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14 text-sm">
+    <header class="station-header sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
             
-            <!-- Logo e Navegacao Principal lado a lado -->
-            <div class="flex items-center space-x-6">
-                <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900 hover:text-[#971E84] transition-colors">
-                    <span class="w-7 h-7 rounded border border-[#971E84]/30 bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
-                        ET
+            <div class="flex items-center space-x-3">
+                <a href="{{ url_for('index') }}" class="flex items-center space-x-3 text-slate-900 group">
+                    <span class="w-8 h-8 rounded-lg brand-badge flex items-center justify-center text-xs tracking-wider">
+                        EV
                     </span>
-                    <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="font-bold text-sm tracking-tight text-slate-900 group-hover:text-[#971E84] transition-colors">Evonik ETE</span>
+                            <span class="text-[10px] font-mono px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded border border-slate-200">Americana/SP</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 font-mono leading-none mt-0.5">Sistema de Avaliação Ambiental</p>
+                    </div>
                 </a>
+            </div>
 
-                <!-- Abas de Navegacao: Relatório de Excel e Leitor de PDF -->
-                <nav class="flex items-center space-x-1.5 border-l border-slate-200 pl-4 sm:pl-6">
-                    <a href="{{ url_for('index') }}"
-                       class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors {% if request.endpoint == 'index' %}bg-[#971E84]/10 text-[#971E84] font-semibold border border-[#971E84]/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100{% endif %}">
-                        Relatório de Excel
-                    </a>
-                    <a href="{{ url_for('importar_pdf') }}"
-                       class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors {% if request.endpoint == 'importar_pdf' %}bg-[#971E84]/10 text-[#971E84] font-semibold border border-[#971E84]/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100{% endif %}">
-                        Leitor de PDF
-                    </a>
-                </nav>
+            <nav class="nav-segment-container">
+                <a href="{{ url_for('index') }}"
+                   class="nav-segment-item {% if request.endpoint == 'index' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="8" y1="13" x2="16" y2="13"/>
+                        <line x1="8" y1="17" x2="16" y2="17"/>
+                        <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                    <span>Relatório de Excel</span>
+                </a>
+                <a href="{{ url_for('importar_pdf') }}"
+                   class="nav-segment-item {% if request.endpoint == 'importar_pdf' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <path d="M9 15h6"/>
+                        <path d="M9 11h6"/>
+                    </svg>
+                    <span>Leitor de PDF</span>
+                </a>
+            </nav>
+
+            <div class="hidden md:flex items-center space-x-2 text-[11px] font-mono text-slate-500">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>CONAMA 430 & 357 (Cl. 2)</span>
             </div>
         </div>
     </header>
 
-    <!-- Avisos Flash -->
     <div class="max-w-6xl mx-auto px-4 sm:px-6 pt-4 w-full">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="mb-4 p-3.5 rounded-lg border text-xs font-medium flex items-center space-x-2 {% if category == 'error' %}bg-rose-50 border-rose-200 text-rose-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}" role="alert">
-                        <span>{% if category == 'error' %}⚠️{% else %}✓{% endif %}</span>
+                        <span class="font-bold">{% if category == 'error' %}[ERRO]{% else %}[SUCESSO]{% endif %}</span>
                         <span>{{ message }}</span>
                     </div>
                 {% endfor %}
@@ -107,21 +98,22 @@
         {% endwith %}
     </div>
 
-    <!-- Conteudo Principal -->
     <main class="flex-grow max-w-6xl mx-auto px-4 sm:px-6 py-6 w-full">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Rodape Tecnico -->
-    <footer class="border-t border-slate-200/80 bg-white/50 backdrop-blur-xs mt-auto py-5 text-xs text-slate-500">
+    <footer class="border-t border-slate-200 bg-white/70 backdrop-blur-xs mt-auto py-5 text-xs text-slate-500">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-2">
-            <div class="flex items-center space-x-2">
-                <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                <span>Sistema ativo: banco SQLite local e validação com pandas</span>
+            <div class="flex items-center space-x-2 font-mono text-[11px]">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                <span>Estação de Tratamento de Efluentes Evonik • Americana/SP</span>
             </div>
-            <p class="font-mono text-[11px] text-slate-400">Hackathon Evonik + ETEC • Rio Piracicaba</p>
+            <div class="text-[11px] font-mono text-slate-400">
+                Corpo Receptor: Rio Piracicaba • Parâmetros CONAMA e Decreto SP 8.468
+            </div>
         </div>
     </footer>
 
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

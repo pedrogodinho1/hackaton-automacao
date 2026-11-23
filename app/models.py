@@ -35,11 +35,11 @@ class PontoColeta(db.Model):
     __tablename__ = 'pontos_coleta'
 
     id = db.Column(db.Integer, primary_key=True)
-    codigo = db.Column(db.String(10), unique=True, nullable=False)  # P1, P2, P3, P4
+    codigo = db.Column(db.String(10), unique=True, nullable=False)
     nome = db.Column(db.String(100), nullable=False)
-    matriz = db.Column(db.String(50), nullable=False)               # Efluente Liquido ou Agua Superficial
+    matriz = db.Column(db.String(50), nullable=False)
     finalidade = db.Column(db.String(255), nullable=False)
-    sinonimos = db.Column(db.String(255), nullable=True)            # Termos equivalentes separados por pipe
+    sinonimos = db.Column(db.String(255), nullable=True)
 
     def __repr__(self):
         return f"<PontoColeta {self.codigo}: {self.nome}>"
@@ -47,7 +47,7 @@ class PontoColeta(db.Model):
 
 class Legislacao(db.Model):
     """
-    Normas de referencia usadas nos laudos e relatorios
+    Normas ambientais de referencia usadas nos laudos e relatorios
     (CONAMA 430/2011, Decreto SP 8.468/1976 e CONAMA 357/2005).
     """
     __tablename__ = 'legislacoes'
@@ -55,8 +55,8 @@ class Legislacao(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     codigo = db.Column(db.String(50), unique=True, nullable=False)
     nome = db.Column(db.String(150), nullable=False)
-    esfera = db.Column(db.String(50), nullable=False)               # Federal ou Estadual (SP)
-    artigo_referencia = db.Column(db.String(50), nullable=True)     # Ex: Art. 16, Art. 18
+    esfera = db.Column(db.String(50), nullable=False)
+    artigo_referencia = db.Column(db.String(50), nullable=True)
     aplicacao = db.Column(db.String(100), nullable=False)
     descricao = db.Column(db.Text, nullable=True)
 
@@ -66,52 +66,46 @@ class Legislacao(db.Model):
 
 class LimiteLegal(db.Model):
     """
-    Cadastro de parametros quimicos e fisicos com seus limites legais.
-    Inclui regras de validacao para P2 e calculo de eficiencia para a ETE.
+    Cadastro de parametros fisico-quimicos com seus tetos legais no CONAMA 430,
+    Decreto SP 8.468 e CONAMA 357 Classe 2, alem das metas de eficiencia da ETE.
     """
     __tablename__ = 'limites_legais'
 
     id = db.Column(db.Integer, primary_key=True)
     parametro = db.Column(db.String(100), unique=True, nullable=False)
-    simbolo = db.Column(db.String(30), nullable=True)               # Ex: DBO5,20, Fe, CN-
-    sinonimos = db.Column(db.Text, nullable=True)                   # Sinonimos separados por pipe
+    simbolo = db.Column(db.String(30), nullable=True)
+    sinonimos = db.Column(db.Text, nullable=True)
     categoria = db.Column(db.String(60), nullable=True)
     unidade = db.Column(db.String(30), nullable=False)
 
-    # Limites para P2 (Efluente Tratado) no CONAMA 430/2011 Art. 16
     limite_min_conama430 = db.Column(db.Float, nullable=True)
     limite_max_conama430 = db.Column(db.Float, nullable=True)
     texto_conama430 = db.Column(db.String(60), nullable=True)
 
-    # Limites para P2 no Decreto Estadual SP 8.468/1976 Art. 18
     limite_min_decreto8468 = db.Column(db.Float, nullable=True)
     limite_max_decreto8468 = db.Column(db.Float, nullable=True)
     texto_decreto8468 = db.Column(db.String(60), nullable=True)
 
-    # Criterio mais restritivo consolidado entre as duas leis
     limite_min_restritivo = db.Column(db.Float, nullable=True)
     limite_max_restritivo = db.Column(db.Float, nullable=True)
     norma_mais_restritiva = db.Column(db.String(100), nullable=True)
 
-    # Limites para o Rio Piracicaba (P3 e P4) segundo CONAMA 357/2005 Classe 2
     monitorado_no_rio = db.Column(db.Boolean, default=False)
     limite_min_conama357 = db.Column(db.Float, nullable=True)
     limite_max_conama357 = db.Column(db.Float, nullable=True)
     texto_conama357 = db.Column(db.String(60), nullable=True)
 
-    # Eficiencia de remocao na ETE (P1 vs P2)
     calcula_eficiencia = db.Column(db.Boolean, default=False)
-    eficiencia_minima_pct = db.Column(db.Float, nullable=True)      # Meta minima (ex: 60% para DBO)
+    eficiencia_minima_pct = db.Column(db.Float, nullable=True)
     tipo_avaliacao_eficiencia = db.Column(db.String(50), nullable=True)
 
-    # Parametros de acompanhamento operacional (DQO, SST) sem limite de emissao
     apenas_monitoramento_p2 = db.Column(db.Boolean, default=False)
     observacao_normativa = db.Column(db.Text, nullable=True)
 
     def avaliar_p2(self, valor_medido: float, eficiencia_pct: float = None) -> dict:
         """
         Avalia o valor medido na saida da ETE contra o CONAMA 430 e o Decreto 8.468.
-        Se as duas normas divergirem sobre o mesmo parametro, aplica a mais restritiva.
+        Quando as normas divergem para o mesmo parametro, prevalece o limite mais rigoroso.
         """
         if self.apenas_monitoramento_p2:
             return {
@@ -132,7 +126,6 @@ class LimiteLegal(db.Model):
         violacoes = []
         detalhes = []
 
-        # Checa CONAMA 430/2011
         atende_conama = True
         if self.limite_min_conama430 is not None and valor_medido < self.limite_min_conama430:
             atende_conama = False
@@ -149,7 +142,6 @@ class LimiteLegal(db.Model):
                     violacoes.append("CONAMA 430/2011")
                 detalhes.append(f"eficiencia ({eficiencia_pct:.1f}%) abaixo do minimo de {self.eficiencia_minima_pct:.0f}%")
 
-        # Checa Decreto Estadual SP 8.468/1976
         atende_decreto = True
         if self.limite_min_decreto8468 is not None and valor_medido < self.limite_min_decreto8468:
             atende_decreto = False
@@ -276,14 +268,14 @@ class ResultadoAnalise(db.Model):
     laudo_id = db.Column(db.Integer, db.ForeignKey('laudos.id'), nullable=True)
     codigo_laudo = db.Column(db.String(100), nullable=False)
     data_coleta = db.Column(db.Date, nullable=False)
-    ponto_coleta = db.Column(db.String(20), nullable=False)         # P1, P2, P3 ou P4
+    ponto_coleta = db.Column(db.String(20), nullable=False)
     parametro_id = db.Column(db.Integer, db.ForeignKey('limites_legais.id'), nullable=True)
     parametro = db.Column(db.String(100), nullable=False)
     valor_medido = db.Column(db.Float, nullable=True)
-    valor_texto = db.Column(db.String(50), nullable=True)           # Guarda o texto original (ex: "< 0,01")
+    valor_texto = db.Column(db.String(50), nullable=True)
     unidade = db.Column(db.String(30), nullable=False)
 
-    status_conformidade = db.Column(db.String(50), nullable=True)   # Conforme, Nao Conforme ou Informativo
+    status_conformidade = db.Column(db.String(50), nullable=True)
     em_conformidade = db.Column(db.Boolean, nullable=True)
     norma_violada = db.Column(db.String(150), nullable=True)
     alerta = db.Column(db.Text, nullable=True)
@@ -305,12 +297,12 @@ class EficienciaETE(db.Model):
     laudo_id = db.Column(db.Integer, db.ForeignKey('laudos.id'), nullable=True)
     codigo_laudo = db.Column(db.String(100), nullable=False)
     data_referencia = db.Column(db.Date, nullable=False)
-    parametro = db.Column(db.String(100), nullable=False)           # DBO5,20, DQO, etc.
+    parametro = db.Column(db.String(100), nullable=False)
     unidade = db.Column(db.String(30), nullable=False, default='mg/L')
     entrada_p1 = db.Column(db.Float, nullable=False)
     saida_p2 = db.Column(db.Float, nullable=False)
     eficiencia_percentual = db.Column(db.Float, nullable=False)
-    avaliacao = db.Column(db.String(50), nullable=False)            # Conforme, Operacional, etc.
+    avaliacao = db.Column(db.String(50), nullable=False)
     atingiu_meta = db.Column(db.Boolean, nullable=True)
 
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)

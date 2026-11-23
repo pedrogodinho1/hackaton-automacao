@@ -11,14 +11,14 @@ from app.services import (
 
 @app.route('/')
 def index():
-    # Tela inicial com formulario de upload e listagem das campanhas salvas
+    """Exibe a pagina inicial de importacao de planilhas Excel e o historico salvo."""
     campanhas = Laudo.query.order_by(Laudo.data_coleta.desc()).all()
     return render_template('index.html', campanhas=campanhas)
 
 
 @app.route('/importar', methods=['POST'])
 def importar():
-    # Recebe a planilha enviada, roda a analise em pandas e exibe o relatorio
+    """Valida a planilha Excel enviada, executa a analise ambiental e renderiza o parecer."""
     if 'arquivo' not in request.files:
         flash("Nenhum arquivo enviado. Selecione uma planilha Excel (.xlsx ou .xls).", "error")
         return redirect(url_for('index'))
@@ -44,7 +44,7 @@ def importar():
 
 @app.route('/importar-pdf', methods=['GET', 'POST'])
 def importar_pdf():
-    # Rota dedicada para a leitura automatica de laudos laboratoriais em PDF
+    """Exibe a tela de leitura de PDF (GET) ou extrai, persiste e analisa o laudo enviado (POST)."""
     if request.method == 'GET':
         campanhas = Laudo.query.order_by(Laudo.data_coleta.desc()).all()
         return render_template('importar_pdf.html', campanhas=campanhas)
@@ -74,14 +74,14 @@ def importar_pdf():
 
 @app.route('/relatorio/<codigo_laudo>')
 def ver_relatorio(codigo_laudo):
-    # Exibe na interface HTML a campanha salva no banco
+    """Carrega os dados de uma campanha ja gravada no banco e exibe o parecer em HTML."""
     contexto = obter_contexto_relatorio(codigo_laudo)
     return render_template('relatorio.html', **contexto)
 
 
 @app.route('/relatorio/<codigo_laudo>/pdf')
 def baixar_relatorio_pdf(codigo_laudo):
-    # Gera o PDF em memoria via xhtml2pdf e entrega como download (attachment)
+    """Gera o relatorio tecnico em PDF na memoria via xhtml2pdf e entrega para download."""
     try:
         contexto = obter_contexto_relatorio(codigo_laudo)
         pdf_buffer = gerar_pdf_relatorio(contexto)

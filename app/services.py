@@ -51,7 +51,10 @@ MAPA_COLUNAS_EXCEL = {
 
 
 def extrair_metadados_planilha(excel_file: pd.ExcelFile) -> dict:
-    # Se a planilha tiver uma aba com metadados (como Metadados_Amostras), puxa os dados do cabecalho
+    """
+    Busca abas auxiliares de metadados na planilha (ex: Metadados_Amostras) para
+    preencher laboratorio, unidade monitorada e corpo receptor automaticamente.
+    """
     metadados = {
         'laboratorio': 'Laboratório Acreditado',
         'unidade_monitorada': 'ETE Industrial, Unidade Americana/SP',
@@ -86,7 +89,7 @@ def extrair_metadados_planilha(excel_file: pd.ExcelFile) -> dict:
 
 
 def selecionar_aba_dados(excel_file: pd.ExcelFile) -> str:
-    # Procura por abas conhecidas de dados. Se nao achar, pega a primeira do arquivo
+    """Seleciona a aba principal de medicoes por nomes conhecidos ou usa a primeira aba."""
     abas = excel_file.sheet_names
     preferenciais = ['dados_importacao', 'dados', 'medicoes', 'resultados', 'laudo', 'planilha1']
     for p in preferenciais:
@@ -97,7 +100,10 @@ def selecionar_aba_dados(excel_file: pd.ExcelFile) -> str:
 
 
 def padronizar_dataframe_pandas(df: pd.DataFrame) -> pd.DataFrame:
-    # Mapeia os cabecalhos para nomes padrao e limpa linhas em branco
+    """
+    Normaliza os nomes das colunas via dicionario de sinonimos, limpa linhas vazias
+    e extrai datas, mes de referencia e codigo do ponto de coleta (P1 a P4).
+    """
     novas_colunas = {}
     for col in df.columns:
         col_limpa = normalizar_texto(str(col)).replace(' ', '_')
@@ -508,16 +514,16 @@ def gerar_pdf_relatorio(dados_contexto: dict) -> io.BytesIO:
 
 def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
     """
-    Processa um arquivo PDF de laudo laboratorial utilizando a biblioteca pypdf.
-    Extrai os metadados do cabecalho, os ensaios de efluentes (P1 e P2) e os
-    resultados de monitoramento do corpo receptor (P3 e P4).
+    Extrai metadados e resultados analiticos (P1 a P4) de arquivos PDF via pypdf.
+    Identifica automaticamente tanto o laudo laboratorial original (modelo Hackathon)
+    quanto relatorios tecnicos exportados pelo proprio sistema, recalculando
+    eficiencias da ETE, nao conformidades em P2 e impactos no Rio Piracicaba.
     """
     reader = pypdf.PdfReader(origem_pdf)
     num_paginas = len(reader.pages)
     if num_paginas == 0:
         raise ValueError("O arquivo PDF enviado está vazio ou não possui páginas legíveis.")
 
-    # Concatena o texto de todas as paginas normalizando hifens e simbolos matematicos
     textos_paginas = []
     for p in reader.pages:
         txt = p.extract_text() or ""
@@ -529,49 +535,6 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
     texto_p2 = textos_paginas[1] if num_paginas >= 2 else ""
     texto_p3 = textos_paginas[2] if num_paginas >= 3 else ""
 
-    # 1. Metadados administrativos (geralmente presentes na primeira pagina)
-    def buscar_campo(padrao, default=""):
-        m = re.search(padrao, texto_completo)
-        if m:
-            val = m.group(1).strip()
-            # Limpa marcadores de colchetes de templates genericos
-            val = re.sub(r'^\[|\]$', '', val).strip()
-            return val
-        return default
-
-    codigo_laudo_bruto = buscar_campo(r'Código do Laudo\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'LAUDO-PDF')
-    data_coleta_str = buscar_campo(r'Data da Coleta\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
-    unidade_monitorada = buscar_campo(r'Unidade Monitorada\s*\[?(.*?)\]?(?:\s+Campanha|$)', 'ETE Industrial - Unidade Americana/SP')
-    campanha_mes_str = buscar_campo(r'Campanha\s*/\s*Mês\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
-    corpo_receptor = buscar_campo(r'Corpo Receptor\s*\[?(.*?)\]?(?:\s+Laboratório|$)', 'Rio Piracicaba (Classe 2)')
-    laboratorio = buscar_campo(r'Laboratório\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'Laboratório Acreditado')
-
-    # Trata data de coleta (se for placeholder como DD/MM/AAAA, assume data atual)
-    data_coleta = date.today()
-    if data_coleta_str and not any(ph in data_coleta_str.upper() for ph in ['DD/', 'AAAA', 'MM/']):
-        for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
-            try:
-                data_coleta = datetime.strptime(data_coleta_str, fmt).date()
-                break
-            except ValueError:
-                pass
-
-    # Trata campanha/mes (ex: MM/AAAA, 2026-09 ou extrai da data)
-    mes_referencia = data_coleta.strftime('%Y-%m')
-    if campanha_mes_str and not any(ph in campanha_mes_str.upper() for ph in ['MM/', 'AAAA']):
-        m_mes = re.search(r'(\d{2})[/-](\d{4})', campanha_mes_str)
-        if m_mes:
-            mes_referencia = f"{m_mes.group(2)}-{m_mes.group(1)}"
-        elif re.match(r'^\d{4}-\d{2}$', campanha_mes_str):
-            mes_referencia = campanha_mes_str
-
-    # Ajusta codigo final do laudo se for generico
-    if 'ANO' in codigo_laudo_bruto or '001' in codigo_laudo_bruto or not codigo_laudo_bruto:
-        codigo_campanha = f"CAMP-{mes_referencia}"
-    else:
-        codigo_campanha = codigo_laudo_bruto
-
-    # Funcao auxiliar para converter numeros no padrao brasileiro ("480,0" -> 480.0)
     def converter_valor(v_str):
         if not v_str:
             return None, "Sem Dados"
@@ -579,16 +542,20 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         if v_limpo.startswith('<'):
             num_parte = re.sub(r'[^\d,\.]', '', v_limpo).replace(',', '.')
             try:
-                # Usa metade do limite de quantificacao nas analises quantitativas
+                # Adota metade do limite de quantificacao (< LQ) para calculos numericos
                 return float(num_parte) / 2.0, v_limpo
             except ValueError:
                 return None, v_limpo
+        num_txt = v_limpo
+        if ',' in num_txt and '.' in num_txt:
+            num_txt = num_txt.replace('.', '').replace(',', '.')
+        elif ',' in num_txt:
+            num_txt = num_txt.replace(',', '.')
         try:
-            return float(v_limpo.replace('.', '').replace(',', '.')), v_limpo
+            return float(num_txt), v_limpo
         except ValueError:
             return None, v_limpo
 
-    # Carrega todos os limites legais do banco para associacao precisa
     todos_limites = LimiteLegal.query.all()
     limites_ordenados = sorted(todos_limites, key=lambda l: len(l.parametro), reverse=True)
 
@@ -610,179 +577,423 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
 
     medicoes_extraidas = []
     alertas_nao_conformidade = []
-
-    # 2. Leitura da Tabela de Efluentes (Página 2: P1 Bruto e P2 Tratado)
-    # Trata quebras de linha frequentes em tabelas de PDF
-    t2_tratado = texto_p2
-    for quebra, uniao in [
-        (r'DBO\s*\n\s*5,20', 'DBO5,20'),
-        (r'Materiais\s*\n\s*Sedimentáveis', 'Materiais Sedimentáveis'),
-        (r'Sólidos Suspensos\s*\n\s*Totais', 'Sólidos Suspensos Totais'),
-        (r'Óleos e Graxas\s*\n\s*\(Minerais\)', 'Óleos e Graxas (Minerais)'),
-        (r'Nitrogênio Amoniacal\s*\n\s*Total', 'Nitrogênio Amoniacal Total'),
-        (r'Ferro Dissolvido\s*\n\s*\(Fe\)', 'Ferro Dissolvido (Fe)'),
-        (r'Manganês Dissolvido\s*\n\s*\(Mn\)', 'Manganês Dissolvido (Mn)'),
-        (r'Cobre Dissolvido\s*\n\s*\(Cu\)', 'Cobre Dissolvido (Cu)'),
-        (r'Zinco Total\s*\n\s*\(Zn\)', 'Zinco Total (Zn)'),
-        (r'Cromo Hexavalente\s*\n\s*\(Cr\s*6\+\s*\)', 'Cromo Hexavalente (Cr6+)'),
-        (r'Chumbo Total\s*\n\s*\(Pb\)', 'Chumbo Total (Pb)'),
-        (r'Níquel Total\s*\n\s*\(Ni\)', 'Níquel Total (Ni)'),
-        (r'Fluoreto Total\s*\n\s*\(F-\)', 'Fluoreto Total (F-)'),
-        (r'Fenóis Totais', 'Fenóis Totais'),
-        (r'Cianeto Total\s*\n\s*\(CN-\)', 'Cianeto Total (CN-)'),
-        (r'Mercúrio Total\s*\n\s*\(Hg\)', 'Mercúrio Total (Hg)'),
-    ]:
-        t2_tratado = re.sub(quebra, uniao, t2_tratado, flags=re.IGNORECASE)
-
-    regex_p1_p2 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L)\s+([\d,\.<]+)\s+([\d,\.<]+)'
-    for raw_param, unidade, v1_str, v2_str in re.findall(regex_p1_p2, t2_tratado):
-        regra = casar_limite_legal(raw_param)
-        nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
-
-        v1_num, v1_txt = converter_valor(v1_str)
-        v2_num, v2_txt = converter_valor(v2_str)
-
-        # Medição P1 (Efluente Bruto)
-        medicoes_extraidas.append({
-            'codigo_laudo': codigo_campanha,
-            'data_coleta': data_coleta,
-            'ponto_coleta': 'P1',
-            'parametro_id': regra.id if regra else None,
-            'parametro': nome_param,
-            'valor_medido': v1_num,
-            'valor_texto': v1_txt,
-            'unidade': unidade,
-            'status_conformidade': 'Informativo',
-            'em_conformidade': True,
-            'norma_violada': None,
-            'alerta': None
-        })
-
-        # Medição P2 (Efluente Tratado) com avaliação de conformidade legal
-        status_p2 = "Informativo"
-        em_conf_p2 = True
-        norma_violada = None
-        alerta_p2 = None
-
-        if regra:
-            avaliacao = regra.avaliar_p2(v2_num)
-            status_p2 = avaliacao['status_conformidade']
-            em_conf_p2 = avaliacao['em_conformidade']
-            norma_violada = avaliacao['norma_violada']
-            alerta_p2 = avaliacao['alerta']
-
-            if status_p2 == "Não Conforme":
-                alertas_nao_conformidade.append({
-                    'mes': mes_referencia,
-                    'ponto': 'P2',
-                    'parametro': nome_param,
-                    'valor': v2_num,
-                    'unidade': unidade,
-                    'norma_violada': norma_violada,
-                    'mensagem': alerta_p2
-                })
-
-        medicoes_extraidas.append({
-            'codigo_laudo': codigo_campanha,
-            'data_coleta': data_coleta,
-            'ponto_coleta': 'P2',
-            'parametro_id': regra.id if regra else None,
-            'parametro': nome_param,
-            'valor_medido': v2_num,
-            'valor_texto': v2_txt,
-            'unidade': unidade,
-            'status_conformidade': status_p2,
-            'em_conformidade': em_conf_p2,
-            'norma_violada': norma_violada,
-            'alerta': alerta_p2
-        })
-
-    # 3. Leitura do Corpo Receptor (Página 3: P3 Montante e P4 Jusante)
-    t3_tratado = texto_p3
-    for quebra, uniao in [
-        (r'DBO\s*\n\s*5,20', 'DBO5,20'),
-        (r'Oxigênio Dissolvido\s*\n\s*\(OD\)', 'Oxigênio Dissolvido (OD)'),
-        (r'Nitrogênio Amoniacal\s*\n\s*Total', 'Nitrogênio Amoniacal Total'),
-        (r'Fósforo Total', 'Fósforo Total'),
-        (r'Ferro Dissolvido\s*\n\s*\(Fe\)', 'Ferro Dissolvido (Fe)'),
-        (r'Zinco Total\s*\n\s*\(Zn\)', 'Zinco Total (Zn)'),
-        (r'Cianeto Total\s*\n\s*\(CN-\)', 'Cianeto Total (CN-)'),
-    ]:
-        t3_tratado = re.sub(quebra, uniao, t3_tratado, flags=re.IGNORECASE)
-
-    regex_p3_p4 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L|UNT)\s+([\d,\.<]+)\s+([\d,\.<]+)\s+([\+\-]?[\d,\.]+)'
     impactos_rio = []
 
-    for raw_param, unidade, v3_str, v4_str, delta_str in re.findall(regex_p3_p4, t3_tratado):
-        regra = casar_limite_legal(raw_param)
-        nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
+    # Detecta se o PDF enviado e um Relatorio Tecnico exportado pelo proprio sistema
+    eh_relatorio_sistema = (
+        "RELATÓRIO TÉCNICO DE" in texto_completo
+        and "CONFORMIDADE AMBIENTAL" in texto_completo
+    )
 
-        v3_num, v3_txt = converter_valor(v3_str)
-        v4_num, v4_txt = converter_valor(v4_str)
+    if eh_relatorio_sistema:
+        def buscar_linha_seguinte(rotulo, default=""):
+            m = re.search(rf'{rotulo}:\s*\n\s*([^\n]+)', texto_completo)
+            return m.group(1).strip() if m else default
 
-        medicoes_extraidas.append({
-            'codigo_laudo': codigo_campanha,
-            'data_coleta': data_coleta,
-            'ponto_coleta': 'P3',
-            'parametro_id': regra.id if regra else None,
-            'parametro': nome_param,
-            'valor_medido': v3_num,
-            'valor_texto': v3_txt,
-            'unidade': unidade,
-            'status_conformidade': 'Informativo',
-            'em_conformidade': True,
-            'norma_violada': None,
-            'alerta': None
-        })
+        codigo_campanha = buscar_linha_seguinte('Código do Laudo', 'LAUDO-PDF')
+        mes_referencia = buscar_linha_seguinte('Mês Referência', date.today().strftime('%Y-%m'))
+        data_coleta_str = buscar_linha_seguinte('Data da Coleta', '')
+        laboratorio = buscar_linha_seguinte('Laboratório', 'Laboratório Acreditado')
+        unidade_monitorada = buscar_linha_seguinte('Unidade', 'ETE Industrial - Unidade Americana/SP')
+        corpo_receptor = buscar_linha_seguinte('Corpo Receptor', 'Rio Piracicaba (Classe 2)')
 
-        medicoes_extraidas.append({
-            'codigo_laudo': codigo_campanha,
-            'data_coleta': data_coleta,
-            'ponto_coleta': 'P4',
-            'parametro_id': regra.id if regra else None,
-            'parametro': nome_param,
-            'valor_medido': v4_num,
-            'valor_texto': v4_txt,
-            'unidade': unidade,
-            'status_conformidade': 'Informativo',
-            'em_conformidade': True,
-            'norma_violada': None,
-            'alerta': None
-        })
+        data_coleta = date.today()
+        if data_coleta_str:
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+                try:
+                    data_coleta = datetime.strptime(data_coleta_str, fmt).date()
+                    break
+                except ValueError:
+                    pass
 
-        # Diagnostico de impacto no rio
-        delta = round(v4_num - v3_num, 3) if (v4_num is not None and v3_num is not None) else 0.0
-        var_pct = round(((v4_num - v3_num) / v3_num) * 100.0, 1) if (v3_num and v3_num > 0) else 0.0
+        linhas_sys = [l.strip() for l in texto_completo.splitlines() if l.strip()]
+        secao_atual = None
+        i = 0
+        regex_val_unid = re.compile(r'^([<>]?\s*[\d,\.]+)\s+(.+)$')
 
-        status_rio = "Normal"
-        alerta_impacto = None
+        while i < len(linhas_sys):
+            linha = linhas_sys[i]
+            if linha.startswith('1. Eficiência de Tratamento'):
+                secao_atual = 'eficiencia'
+                i += 1
+                continue
+            elif linha.startswith('2. Avaliação do Corpo Receptor'):
+                secao_atual = 'rio'
+                i += 1
+                continue
+            elif linha.startswith('3. Resultados Analíticos'):
+                secao_atual = 'p2'
+                i += 1
+                continue
+            elif linha.startswith('Legislações aplicadas:') or linha.startswith('Documento gerado'):
+                secao_atual = None
+                i += 1
+                continue
 
-        if regra and regra.limite_max_conama357 is not None and v4_num > regra.limite_max_conama357:
-            status_rio = "Alerta de Impacto"
-            alerta_impacto = (
-                f"Concentração em Jusante (P4 = {v4_num} {unidade}) ultrapassou o limite "
-                f"do CONAMA 357/2005 Classe 2 (<= {regra.limite_max_conama357} {unidade}). "
-                f"Elevação de +{delta} {unidade} ({var_pct:+.1f}%) em relação a Montante (P3 = {v3_num} {unidade})."
-            )
-        elif delta > 0 and var_pct >= 20.0:
-            status_rio = "Atenção"
-            alerta_impacto = (
-                f"Elevação de {var_pct:+.1f}% no rio após o ponto de lançamento "
-                f"(P3 = {v3_num} -> P4 = {v4_num} {unidade}). Recomenda-se investigar a contribuição da ETE."
-            )
+            # Ignora cabecalhos repetidos de tabela e linhas de aviso
+            if linha in (
+                'Parâmetro', 'Entrada P1 (Bruto)', 'Saída P2 (Tratado)', 'Eficiência (%)',
+                'Avaliação', 'Montante (P3)', 'Jusante (P4)', 'Variação', 'Limite Classe 2',
+                'Diagnóstico', 'Parâmetro Químico / Físico', 'Resultado Medido', 'Unidade',
+                'Situação Legal'
+            ) or linha.startswith('Aviso:') or linha.startswith('a contribuição') or linha.startswith('(+'):
+                i += 1
+                continue
 
-        impactos_rio.append({
-            'parametro': nome_param,
-            'montante_p3': v3_num,
-            'jusante_p4': v4_num,
-            'diferenca': delta,
-            'variacao_pct': var_pct,
-            'unidade': unidade,
-            'status_rio': status_rio,
-            'alerta_impacto': alerta_impacto,
-            'limite_classe2': regra.texto_conama357 if regra else 'Não tabelado',
-            'mes': mes_referencia
-        })
+            if secao_atual == 'eficiencia' and i + 2 < len(linhas_sys):
+                m1 = regex_val_unid.match(linhas_sys[i + 1])
+                m2 = regex_val_unid.match(linhas_sys[i + 2])
+                if m1 and m2:
+                    regra = casar_limite_legal(linha)
+                    nome_param = regra.parametro if regra else linha
+                    v1_num, v1_txt = converter_valor(m1.group(1))
+                    unidade = m1.group(2).strip()
+                    medicoes_extraidas.append({
+                        'codigo_laudo': codigo_campanha,
+                        'data_coleta': data_coleta,
+                        'ponto_coleta': 'P1',
+                        'parametro_id': regra.id if regra else None,
+                        'parametro': nome_param,
+                        'valor_medido': v1_num,
+                        'valor_texto': v1_txt,
+                        'unidade': unidade,
+                        'status_conformidade': 'Informativo',
+                        'em_conformidade': True,
+                        'norma_violada': None,
+                        'alerta': None
+                    })
+                    i += 3
+                    continue
+
+            elif secao_atual == 'rio' and i + 2 < len(linhas_sys):
+                m3 = regex_val_unid.match(linhas_sys[i + 1])
+                m4 = regex_val_unid.match(linhas_sys[i + 2])
+                if m3 and m4:
+                    regra = casar_limite_legal(linha)
+                    nome_param = regra.parametro if regra else linha
+                    v3_num, v3_txt = converter_valor(m3.group(1))
+                    v4_num, v4_txt = converter_valor(m4.group(1))
+                    unidade = m3.group(2).strip()
+
+                    medicoes_extraidas.append({
+                        'codigo_laudo': codigo_campanha,
+                        'data_coleta': data_coleta,
+                        'ponto_coleta': 'P3',
+                        'parametro_id': regra.id if regra else None,
+                        'parametro': nome_param,
+                        'valor_medido': v3_num,
+                        'valor_texto': v3_txt,
+                        'unidade': unidade,
+                        'status_conformidade': 'Informativo',
+                        'em_conformidade': True,
+                        'norma_violada': None,
+                        'alerta': None
+                    })
+                    medicoes_extraidas.append({
+                        'codigo_laudo': codigo_campanha,
+                        'data_coleta': data_coleta,
+                        'ponto_coleta': 'P4',
+                        'parametro_id': regra.id if regra else None,
+                        'parametro': nome_param,
+                        'valor_medido': v4_num,
+                        'valor_texto': v4_txt,
+                        'unidade': unidade,
+                        'status_conformidade': 'Informativo',
+                        'em_conformidade': True,
+                        'norma_violada': None,
+                        'alerta': None
+                    })
+
+                    delta = round(v4_num - v3_num, 3) if (v4_num is not None and v3_num is not None) else 0.0
+                    var_pct = round(((v4_num - v3_num) / v3_num) * 100.0, 1) if (v3_num and v3_num > 0) else 0.0
+                    status_rio = "Normal"
+                    alerta_impacto = None
+
+                    if regra and regra.limite_max_conama357 is not None and v4_num is not None and v4_num > regra.limite_max_conama357:
+                        status_rio = "Alerta de Impacto"
+                        alerta_impacto = (
+                            f"Concentração em Jusante (P4 = {v4_num} {unidade}) ultrapassou o limite "
+                            f"do CONAMA 357/2005 Classe 2 (<= {regra.limite_max_conama357} {unidade}). "
+                            f"Elevação de +{delta} {unidade} ({var_pct:+.1f}%) em relação a Montante (P3 = {v3_num} {unidade})."
+                        )
+                    elif delta > 0 and var_pct >= 20.0:
+                        status_rio = "Atenção"
+                        alerta_impacto = (
+                            f"Elevação de {var_pct:+.1f}% no rio após o ponto de lançamento "
+                            f"(P3 = {v3_num} -> P4 = {v4_num} {unidade}). Recomenda-se investigar a contribuição da ETE."
+                        )
+
+                    impactos_rio.append({
+                        'parametro': nome_param,
+                        'montante_p3': v3_num,
+                        'jusante_p4': v4_num,
+                        'diferenca': delta,
+                        'variacao_pct': var_pct,
+                        'unidade': unidade,
+                        'status_rio': status_rio,
+                        'alerta_impacto': alerta_impacto,
+                        'limite_classe2': regra.texto_conama357 if regra else 'Não tabelado',
+                        'mes': mes_referencia
+                    })
+                    i += 3
+                    continue
+
+            elif secao_atual == 'p2' and i + 2 < len(linhas_sys):
+                val_cand = linhas_sys[i + 1]
+                unid_cand = linhas_sys[i + 2]
+                if re.match(r'^[<>]?\s*[\d,\.]+$', val_cand):
+                    regra = casar_limite_legal(linha)
+                    nome_param = regra.parametro if regra else linha
+                    v2_num, v2_txt = converter_valor(val_cand)
+
+                    status_p2 = "Informativo"
+                    em_conf_p2 = True
+                    norma_violada = None
+                    alerta_p2 = None
+
+                    if regra:
+                        avaliacao = regra.avaliar_p2(v2_num)
+                        status_p2 = avaliacao['status_conformidade']
+                        em_conf_p2 = avaliacao['em_conformidade']
+                        norma_violada = avaliacao['norma_violada']
+                        alerta_p2 = avaliacao['alerta']
+
+                        if status_p2 == "Não Conforme":
+                            alertas_nao_conformidade.append({
+                                'mes': mes_referencia,
+                                'ponto': 'P2',
+                                'parametro': nome_param,
+                                'valor': v2_num,
+                                'unidade': unid_cand,
+                                'norma_violada': norma_violada,
+                                'mensagem': alerta_p2
+                            })
+
+                    medicoes_extraidas.append({
+                        'codigo_laudo': codigo_campanha,
+                        'data_coleta': data_coleta,
+                        'ponto_coleta': 'P2',
+                        'parametro_id': regra.id if regra else None,
+                        'parametro': nome_param,
+                        'valor_medido': v2_num,
+                        'valor_texto': v2_txt,
+                        'unidade': unid_cand,
+                        'status_conformidade': status_p2,
+                        'em_conformidade': em_conf_p2,
+                        'norma_violada': norma_violada,
+                        'alerta': alerta_p2
+                    })
+                    i += 4
+                    continue
+
+            i += 1
+    else:
+        def buscar_campo(padrao, default=""):
+            m = re.search(padrao, texto_completo)
+            if m:
+                val = m.group(1).strip()
+                val = re.sub(r'^\[|\]$', '', val).strip()
+                return val
+            return default
+
+        codigo_laudo_bruto = buscar_campo(r'Código do Laudo\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'LAUDO-PDF')
+        data_coleta_str = buscar_campo(r'Data da Coleta\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
+        unidade_monitorada = buscar_campo(r'Unidade Monitorada\s*\[?(.*?)\]?(?:\s+Campanha|$)', 'ETE Industrial - Unidade Americana/SP')
+        campanha_mes_str = buscar_campo(r'Campanha\s*/\s*Mês\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
+        corpo_receptor = buscar_campo(r'Corpo Receptor\s*\[?(.*?)\]?(?:\s+Laboratório|$)', 'Rio Piracicaba (Classe 2)')
+        laboratorio = buscar_campo(r'Laboratório\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'Laboratório Acreditado')
+
+        data_coleta = date.today()
+        if data_coleta_str and not any(ph in data_coleta_str.upper() for ph in ['DD/', 'AAAA', 'MM/']):
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+                try:
+                    data_coleta = datetime.strptime(data_coleta_str, fmt).date()
+                    break
+                except ValueError:
+                    pass
+
+        mes_referencia = data_coleta.strftime('%Y-%m')
+        if campanha_mes_str and not any(ph in campanha_mes_str.upper() for ph in ['MM/', 'AAAA']):
+            m_mes = re.search(r'(\d{2})[/-](\d{4})', campanha_mes_str)
+            if m_mes:
+                mes_referencia = f"{m_mes.group(2)}-{m_mes.group(1)}"
+            elif re.match(r'^\d{4}-\d{2}$', campanha_mes_str):
+                mes_referencia = campanha_mes_str
+
+        if 'ANO' in codigo_laudo_bruto or '001' in codigo_laudo_bruto or not codigo_laudo_bruto:
+            codigo_campanha = f"CAMP-{mes_referencia}"
+        else:
+            codigo_campanha = codigo_laudo_bruto
+
+        t2_tratado = texto_p2
+        for quebra, uniao in [
+            (r'DBO\s*\n\s*5,20', 'DBO5,20'),
+            (r'Materiais\s*\n\s*Sedimentáveis', 'Materiais Sedimentáveis'),
+            (r'Sólidos Suspensos\s*\n\s*Totais', 'Sólidos Suspensos Totais'),
+            (r'Óleos e Graxas\s*\n\s*\(Minerais\)', 'Óleos e Graxas (Minerais)'),
+            (r'Nitrogênio Amoniacal\s*\n\s*Total', 'Nitrogênio Amoniacal Total'),
+            (r'Ferro Dissolvido\s*\n\s*\(Fe\)', 'Ferro Dissolvido (Fe)'),
+            (r'Manganês Dissolvido\s*\n\s*\(Mn\)', 'Manganês Dissolvido (Mn)'),
+            (r'Cobre Dissolvido\s*\n\s*\(Cu\)', 'Cobre Dissolvido (Cu)'),
+            (r'Zinco Total\s*\n\s*\(Zn\)', 'Zinco Total (Zn)'),
+            (r'Cromo Hexavalente\s*\n\s*\(Cr\s*6\+\s*\)', 'Cromo Hexavalente (Cr6+)'),
+            (r'Chumbo Total\s*\n\s*\(Pb\)', 'Chumbo Total (Pb)'),
+            (r'Níquel Total\s*\n\s*\(Ni\)', 'Níquel Total (Ni)'),
+            (r'Fluoreto Total\s*\n\s*\(F-\)', 'Fluoreto Total (F-)'),
+            (r'Fenóis Totais', 'Fenóis Totais'),
+            (r'Cianeto Total\s*\n\s*\(CN-\)', 'Cianeto Total (CN-)'),
+            (r'Mercúrio Total\s*\n\s*\(Hg\)', 'Mercúrio Total (Hg)'),
+        ]:
+            t2_tratado = re.sub(quebra, uniao, t2_tratado, flags=re.IGNORECASE)
+
+        regex_p1_p2 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L)\s+([\d,\.<]+)\s+([\d,\.<]+)'
+        for raw_param, unidade, v1_str, v2_str in re.findall(regex_p1_p2, t2_tratado):
+            regra = casar_limite_legal(raw_param)
+            nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
+
+            v1_num, v1_txt = converter_valor(v1_str)
+            v2_num, v2_txt = converter_valor(v2_str)
+
+            # Medição P1 (Efluente Bruto)
+            medicoes_extraidas.append({
+                'codigo_laudo': codigo_campanha,
+                'data_coleta': data_coleta,
+                'ponto_coleta': 'P1',
+                'parametro_id': regra.id if regra else None,
+                'parametro': nome_param,
+                'valor_medido': v1_num,
+                'valor_texto': v1_txt,
+                'unidade': unidade,
+                'status_conformidade': 'Informativo',
+                'em_conformidade': True,
+                'norma_violada': None,
+                'alerta': None
+            })
+
+            # Medição P2 (Efluente Tratado) com avaliação de conformidade legal
+            status_p2 = "Informativo"
+            em_conf_p2 = True
+            norma_violada = None
+            alerta_p2 = None
+
+            if regra:
+                avaliacao = regra.avaliar_p2(v2_num)
+                status_p2 = avaliacao['status_conformidade']
+                em_conf_p2 = avaliacao['em_conformidade']
+                norma_violada = avaliacao['norma_violada']
+                alerta_p2 = avaliacao['alerta']
+
+                if status_p2 == "Não Conforme":
+                    alertas_nao_conformidade.append({
+                        'mes': mes_referencia,
+                        'ponto': 'P2',
+                        'parametro': nome_param,
+                        'valor': v2_num,
+                        'unidade': unidade,
+                        'norma_violada': norma_violada,
+                        'mensagem': alerta_p2
+                    })
+
+            medicoes_extraidas.append({
+                'codigo_laudo': codigo_campanha,
+                'data_coleta': data_coleta,
+                'ponto_coleta': 'P2',
+                'parametro_id': regra.id if regra else None,
+                'parametro': nome_param,
+                'valor_medido': v2_num,
+                'valor_texto': v2_txt,
+                'unidade': unidade,
+                'status_conformidade': status_p2,
+                'em_conformidade': em_conf_p2,
+                'norma_violada': norma_violada,
+                'alerta': alerta_p2
+            })
+
+        # 3. Leitura do Corpo Receptor (Página 3: P3 Montante e P4 Jusante)
+        t3_tratado = texto_p3
+        for quebra, uniao in [
+            (r'DBO\s*\n\s*5,20', 'DBO5,20'),
+            (r'Oxigênio Dissolvido\s*\n\s*\(OD\)', 'Oxigênio Dissolvido (OD)'),
+            (r'Nitrogênio Amoniacal\s*\n\s*Total', 'Nitrogênio Amoniacal Total'),
+            (r'Fósforo Total', 'Fósforo Total'),
+            (r'Ferro Dissolvido\s*\n\s*\(Fe\)', 'Ferro Dissolvido (Fe)'),
+            (r'Zinco Total\s*\n\s*\(Zn\)', 'Zinco Total (Zn)'),
+            (r'Cianeto Total\s*\n\s*\(CN-\)', 'Cianeto Total (CN-)'),
+        ]:
+            t3_tratado = re.sub(quebra, uniao, t3_tratado, flags=re.IGNORECASE)
+
+        regex_p3_p4 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L|UNT)\s+([\d,\.<]+)\s+([\d,\.<]+)\s+([\+\-]?[\d,\.]+)'
+
+        for raw_param, unidade, v3_str, v4_str, delta_str in re.findall(regex_p3_p4, t3_tratado):
+            regra = casar_limite_legal(raw_param)
+            nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
+
+            v3_num, v3_txt = converter_valor(v3_str)
+            v4_num, v4_txt = converter_valor(v4_str)
+
+            medicoes_extraidas.append({
+                'codigo_laudo': codigo_campanha,
+                'data_coleta': data_coleta,
+                'ponto_coleta': 'P3',
+                'parametro_id': regra.id if regra else None,
+                'parametro': nome_param,
+                'valor_medido': v3_num,
+                'valor_texto': v3_txt,
+                'unidade': unidade,
+                'status_conformidade': 'Informativo',
+                'em_conformidade': True,
+                'norma_violada': None,
+                'alerta': None
+            })
+
+            medicoes_extraidas.append({
+                'codigo_laudo': codigo_campanha,
+                'data_coleta': data_coleta,
+                'ponto_coleta': 'P4',
+                'parametro_id': regra.id if regra else None,
+                'parametro': nome_param,
+                'valor_medido': v4_num,
+                'valor_texto': v4_txt,
+                'unidade': unidade,
+                'status_conformidade': 'Informativo',
+                'em_conformidade': True,
+                'norma_violada': None,
+                'alerta': None
+            })
+
+            # Diagnostico de impacto no rio
+            delta = round(v4_num - v3_num, 3) if (v4_num is not None and v3_num is not None) else 0.0
+            var_pct = round(((v4_num - v3_num) / v3_num) * 100.0, 1) if (v3_num and v3_num > 0) else 0.0
+
+            status_rio = "Normal"
+            alerta_impacto = None
+
+            if regra and regra.limite_max_conama357 is not None and v4_num > regra.limite_max_conama357:
+                status_rio = "Alerta de Impacto"
+                alerta_impacto = (
+                    f"Concentração em Jusante (P4 = {v4_num} {unidade}) ultrapassou o limite "
+                    f"do CONAMA 357/2005 Classe 2 (<= {regra.limite_max_conama357} {unidade}). "
+                    f"Elevação de +{delta} {unidade} ({var_pct:+.1f}%) em relação a Montante (P3 = {v3_num} {unidade})."
+                )
+            elif delta > 0 and var_pct >= 20.0:
+                status_rio = "Atenção"
+                alerta_impacto = (
+                    f"Elevação de {var_pct:+.1f}% no rio após o ponto de lançamento "
+                    f"(P3 = {v3_num} -> P4 = {v4_num} {unidade}). Recomenda-se investigar a contribuição da ETE."
+                )
+
+            impactos_rio.append({
+                'parametro': nome_param,
+                'montante_p3': v3_num,
+                'jusante_p4': v4_num,
+                'diferenca': delta,
+                'variacao_pct': var_pct,
+                'unidade': unidade,
+                'status_rio': status_rio,
+                'alerta_impacto': alerta_impacto,
+                'limite_classe2': regra.texto_conama357 if regra else 'Não tabelado',
+                'mes': mes_referencia
+            })
 
     # 4. Cálculo de Eficiência da ETE (P1 vs P2)
     # Filtra pares P1 e P2 para DBO5,20, DQO e SST
@@ -814,6 +1025,12 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
                     'atingiu_meta': meta_atingida,
                     'mes': mes_referencia
                 })
+
+    if not medicoes_extraidas:
+        raise ValueError(
+            "Nenhuma medição laboratorial (pontos P1 a P4) foi identificada neste PDF. "
+            "Verifique se o arquivo enviado é um laudo laboratorial original e não um relatório já exportado pelo sistema."
+        )
 
     return {
         'sucesso': True,
@@ -872,7 +1089,6 @@ def importar_relatorio_pdf(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
                 db.session.delete(l)
             db.session.commit()
 
-        # Cadastra o novo registro de Laudo
         novo_laudo = Laudo(
             codigo_laudo=codigo_campanha,
             unidade_monitorada=dados['unidade_monitorada'],
@@ -886,7 +1102,6 @@ def importar_relatorio_pdf(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
         db.session.add(novo_laudo)
         db.session.flush()
 
-        # Cadastra as medições individuais associadas ao Laudo
         for m in dados['medicoes']:
             medicao = ResultadoAnalise(
                 laudo_id=novo_laudo.id,
@@ -905,7 +1120,6 @@ def importar_relatorio_pdf(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
             )
             db.session.add(medicao)
 
-        # Cadastra as taxas de eficiência da ETE
         for ef in dados['eficiencias']:
             ef_obj = EficienciaETE(
                 laudo_id=novo_laudo.id,
