@@ -3,6 +3,7 @@ from app import app
 from app.models import Laudo
 from app.services import (
     importar_relatorio_excel,
+    importar_relatorio_pdf,
     obter_contexto_relatorio,
     gerar_pdf_relatorio,
 )
@@ -39,6 +40,36 @@ def importar():
         db.session.rollback()
         flash(f"Nao foi possivel processar a planilha: {e}", "error")
         return redirect(url_for('index'))
+
+
+@app.route('/importar-pdf', methods=['GET', 'POST'])
+def importar_pdf():
+    # Rota dedicada para a leitura automatica de laudos laboratoriais em PDF
+    if request.method == 'GET':
+        campanhas = Laudo.query.order_by(Laudo.data_coleta.desc()).all()
+        return render_template('importar_pdf.html', campanhas=campanhas)
+
+    if 'arquivo_pdf' not in request.files:
+        flash("Nenhum arquivo enviado. Selecione um laudo laboratorial em formato PDF.", "error")
+        return redirect(url_for('importar_pdf'))
+
+    arquivo = request.files['arquivo_pdf']
+    if not arquivo.filename:
+        flash("Nenhum arquivo selecionado.", "error")
+        return redirect(url_for('importar_pdf'))
+
+    if not arquivo.filename.lower().endswith('.pdf'):
+        flash("Formato inválido. Por favor, selecione um arquivo PDF (.pdf).", "error")
+        return redirect(url_for('importar_pdf'))
+
+    try:
+        resultado = importar_relatorio_pdf(arquivo, nome_arquivo=arquivo.filename)
+        return render_template('relatorio.html', resultado=resultado)
+    except Exception as e:
+        from app import db
+        db.session.rollback()
+        flash(f"Não foi possível processar o laudo em PDF: {e}", "error")
+        return redirect(url_for('importar_pdf'))
 
 
 @app.route('/relatorio/<codigo_laudo>')

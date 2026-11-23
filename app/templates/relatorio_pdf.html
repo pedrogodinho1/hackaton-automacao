@@ -211,7 +211,7 @@
     <!-- 1. Alertas de Nao Conformidade -->
     {% if alertas %}
     <div class="alert-box">
-        <div class="alert-title">⚠️ ALERTAS DE NÃO CONFORMIDADE DETECTADOS (P2 - EFLUENTE TRATADO)</div>
+        <div class="alert-title">[ALERTA] NÃO CONFORMIDADES DETECTADAS (P2 - EFLUENTE TRATADO)</div>
         {% for a in alertas %}
         <div class="alert-item">
             • <strong>{{ a.parametro }}:</strong> {{ a.alerta }}
@@ -291,7 +291,7 @@
             {% if imp.alerta_impacto %}
             <tr style="background-color: #fffbeb;">
                 <td colspan="6" style="padding: 4px 8px; font-size: 7.5pt; color: #92400e;">
-                    ↳ <strong>Aviso:</strong> {{ imp.alerta_impacto }}
+                    &bull; <strong>Aviso:</strong> {{ imp.alerta_impacto }}
                 </td>
             </tr>
             {% endif %}

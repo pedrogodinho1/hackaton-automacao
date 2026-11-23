@@ -67,21 +67,29 @@
 
     <!-- Barra de Navegacao Estilo Zed -->
     <header class="border-b border-slate-200/80 bg-white/70 backdrop-blur-md sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center space-x-4 h-14 text-sm">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14 text-sm">
             
-            <!-- Logo e Identificação -->
-            <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900 hover:text-[#971E84] transition-colors">
-                <span class="w-7 h-7 rounded border border-[#971E84]/30 bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
-                    ET
-                </span>
-                <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
-            </a>
+            <!-- Logo e Navegacao Principal lado a lado -->
+            <div class="flex items-center space-x-6">
+                <a href="{{ url_for('index') }}" class="flex items-center space-x-2.5 font-bold text-slate-900 hover:text-[#971E84] transition-colors">
+                    <span class="w-7 h-7 rounded border border-[#971E84]/30 bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold shadow-2xs">
+                        ET
+                    </span>
+                    <span class="tracking-tight text-sm font-semibold">Evonik ETE</span>
+                </a>
 
-            <!-- Botão de Ação -->
-            <a href="{{ url_for('index') }}"
-               class="inline-flex items-center px-3 py-1.5 rounded-md bg-[#971E84] hover:bg-[#7e186e] text-white font-medium text-xs shadow-xs transition-colors">
-                <span>Nova Análise</span>
-            </a>
+                <!-- Abas de Navegacao: Relatório de Excel e Leitor de PDF -->
+                <nav class="flex items-center space-x-1.5 border-l border-slate-200 pl-4 sm:pl-6">
+                    <a href="{{ url_for('index') }}"
+                       class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors {% if request.endpoint == 'index' %}bg-[#971E84]/10 text-[#971E84] font-semibold border border-[#971E84]/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100{% endif %}">
+                        Relatório de Excel
+                    </a>
+                    <a href="{{ url_for('importar_pdf') }}"
+                       class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors {% if request.endpoint == 'importar_pdf' %}bg-[#971E84]/10 text-[#971E84] font-semibold border border-[#971E84]/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100{% endif %}">
+                        Leitor de PDF
+                    </a>
+                </nav>
+            </div>
         </div>
     </header>
 
