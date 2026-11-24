@@ -52,7 +52,7 @@
             </div>
 
             <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
-                  onsubmit="return confirm('Deseja limpar todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros legais serão mantidos.');">
+                  onsubmit="return confirm('Deseja limpar todas as campanhas carregadas na sessão atual?');">
                 <input type="hidden" name="origem" value="dashboard">
                 <button type="submit" class="btn-industrial-danger">
                     Limpar dados

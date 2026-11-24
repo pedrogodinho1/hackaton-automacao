@@ -20,12 +20,12 @@ O objetivo do sistema é substituir o processo manual de conferência de laudos 
 
 - **Linguagem:** Python 3.14
 - **Framework Web:** Flask (rotas modulares em `app/routes.py`)
-- **ORM e Banco de Dados:** Flask-SQLAlchemy com SQLite (`instance/monitoramento.db`)
+- **ORM, Banco de Referência e Sessão:** Flask-SQLAlchemy com SQLite (`instance/monitoramento.db`) para normas, pontos de coleta e limites legais; armazenamento em memória da sessão (`_LAUDOS_SESSAO`) para campanhas importadas (zerado ao reiniciar o servidor)
 - **Processamento de Planilhas:** pandas e openpyxl
 - **Processamento e Leitura de PDF:** pypdf (7.1.1)
 - **Geração de Relatórios PDF:** xhtml2pdf
-- **Front-end e Estilização:** HTML5 semântico, Jinja2 e Tailwind CSS via CDN oficial
-- **Tipografia:** Newsreader (serif editorial), Inter (sans-serif) e JetBrains Mono (código e métricas)
+- **Front-end e Estilização:** HTML5 semântico, Jinja2, Tailwind CSS via CDN oficial e Chart.js
+- **Tipografia:** Inter (sans-serif) e JetBrains Mono (código e métricas)
 
 ---
 
@@ -38,6 +38,7 @@ O objetivo do sistema é substituir o processo manual de conferência de laudos 
   - Bordas de destaque: `rgba(151, 30, 132, 0.2)`
 - **Layout e Estética:**
   - Fundo em tom `#fafbfc` com grade blueprint técnica (`blueprint-grid`).
+  - Ícone vetorial próprio (`app/static/images/icon.svg`, gota com pulso de telemetria) usado tanto no cabeçalho quanto como favicon.
   - Navegação superior direta e minimalista com as abas lado a lado: **Relatório de Excel**, **Leitor de PDF** e **Dashboard Ambiental**.
   - Ícones vetoriais padronizados no padrão Lucide SVG com traço fino e elegante.
   - Gráficos dinâmicos no Dashboard Ambiental via Chart.js.
@@ -52,12 +53,13 @@ HACKATON/
 │   ├── __init__.py            # Inicialização do Flask, dotenv, limite de upload (16 MB) e SQLAlchemy
 │   ├── models.py              # Modelos relacionais do banco SQLite
 │   ├── routes.py              # Rotas web (Excel, PDF, Dashboard, API JSON, exclusão e download)
-│   ├── services.py            # Regras de negócio, parsers (Excel/PDF), agregação do dashboard e gerador PDF
+│   ├── services.py            # Regras de negócio, sessão em memória, parsers (Excel/PDF), dashboard e gerador PDF
 │   ├── static/
 │   │   ├── css/style.css      # Design system, grade blueprint, cards, tabelas e badges
+│   │   ├── images/icon.svg    # Ícone principal da aplicação e favicon
 │   │   └── js/app.js          # Dropzones, filtros rápidos de tabela e feedback de envio
 │   └── templates/
-│       ├── base.html          # Layout base com barra de navegação compartilhada
+│       ├── base.html          # Layout base com barra de navegação compartilhada e rodapé centralizado
 │       ├── index.html         # Página de upload e leitura de planilhas Excel
 │       ├── importar_pdf.html  # Página dedicada à leitura automática de laudos PDF
 │       ├── dashboard.html     # Dashboard Ambiental com KPIs, filtros e gráficos Chart.js
@@ -66,9 +68,8 @@ HACKATON/
 ├── context/
 │   └── DEV-INSTRUCTIONS.md    # Este guia de diretrizes e especificações
 ├── instance/
-│   └── monitoramento.db       # Base SQLite local persistida
-├── tests/
-│   └── test_intermediario.py  # Suíte automatizada de validação das regras e rotas
+│   └── monitoramento.db       # Base SQLite local com tabelas de referência legal
+├── init_db.py                 # Seed de pontos de coleta, legislações e 22 limites legais
 ├── run.py                     # Ponto de entrada para execução da aplicação Flask
 └── requirements.txt           # Dependências do projeto
 ```
@@ -101,23 +102,23 @@ HACKATON/
 ## 6. Rotas e Fluxo da Aplicação
 
 1. **`GET /` (Relatório de Excel):**
-   - Apresenta a tela de seleção de planilha Excel (.xlsx e .xls) e histórico de campanhas gravadas no banco.
+   - Apresenta a tela de seleção de planilha Excel (.xlsx e .xls) e o histórico de campanhas carregadas na sessão atual.
 2. **`POST /importar`:**
-   - Ingestão da planilha via pandas, execução dos cálculos, gravação no SQLite e renderização do relatório.
+   - Ingestão da planilha via pandas, execução dos cálculos, armazenamento na sessão em memória e renderização do relatório.
 3. **`GET /importar-pdf` (Leitor de PDF):**
-   - Apresenta a tela de seleção de arquivo PDF e histórico de laudos salvos.
+   - Apresenta a tela de seleção de arquivo PDF e o histórico de laudos da sessão atual.
 4. **`POST /importar-pdf`:**
-   - Extrai metadados e amostras P1 a P4 (tanto de laudos laboratoriais quanto de relatórios PDF exportados pelo sistema), calcula eficiências, persiste de forma idempotente e exibe o parecer ambiental.
+   - Extrai metadados e amostras P1 a P4 (tanto de laudos laboratoriais quanto de relatórios PDF exportados pelo sistema), calcula eficiências, atualiza a sessão em memória de forma idempotente e exibe o parecer ambiental.
 5. **`GET /dashboard` (Dashboard Ambiental):**
-   - Painel consolidado com KPIs, filtros de campanha e parâmetro, 5 gráficos dinâmicos em Chart.js, listas de alertas e histórico consolidado.
+   - Painel consolidado com KPIs, filtros de campanha e parâmetro, 5 gráficos dinâmicos em Chart.js, listas de alertas e histórico consolidado (com cabeçalho `Cache-Control: no-store`).
 6. **`GET /api/dashboard`:**
-   - Endpoint JSON que alimenta as atualizações dinâmicas dos filtros, gráficos e listas no Dashboard Ambiental.
+   - Endpoint JSON (`Cache-Control: no-store`) que alimenta as atualizações dinâmicas dos filtros, gráficos e listas no Dashboard Ambiental.
 7. **`GET /relatorio/<codigo_laudo>`:**
-   - Exibição visual detalhada de qualquer campanha salva no histórico (KPIs, eficiência, monitoramento do rio e medições em P2).
+   - Exibição visual detalhada de qualquer campanha carregada na sessão atual (KPIs, eficiência, monitoramento do rio e medições em P2).
 8. **`GET /relatorio/<codigo_laudo>/pdf`:**
    - Renderização em memória e download do laudo técnico oficial em formato PDF.
 9. **`POST /laudo/<codigo_laudo>/excluir` e `POST /laudos/limpar`:**
-   - Exclusão de uma campanha específica ou limpeza completa do histórico, preservando as tabelas de normas e limites legais.
+   - Exclusão de uma campanha específica ou limpeza completa da sessão em memória, mantendo intactas as tabelas de normas e limites legais no SQLite.
 
 ---
 
@@ -134,7 +135,7 @@ HACKATON/
   - Módulo de leitura automática de PDFs laboratoriais e relatórios exportados pelo sistema via `pypdf`, independente da quantidade fixa de páginas e com detecção de PDFs escaneados.
   - Separação da aplicação em abas dedicadas (Relatório de Excel, Leitor de PDF e Dashboard Ambiental).
   - Dashboard Ambiental consolidado com filtros dinâmicos, gráficos Chart.js (conformidade, eficiência histórica, Rio Piracicaba, série de parâmetro em P2 e ranking de não conformidades).
-  - Tratamento transacional idempotente, exclusão/limpeza de laudos, limite de upload (16 MB) e suíte automatizada de testes.
+  - Sessão em memória para campanhas importadas (sem persistir estado entre reinicializações), exclusão/limpeza sincronizada, limite de upload (16 MB) e identidade visual própria com ícone SVG e favicon.
 
 - [ ] **Nível Avançado (Planejado):**
   - Integração com Inteligência Artificial para parecer descritivo automatizado.
@@ -146,6 +147,6 @@ HACKATON/
 ## 8. Diretrizes de Código e Comunicação
 
 1. **Humanização da Comunicação:** Respostas e textos devem ser claros, diretos, cordiais e naturais em português brasileiro, sem jargões artificiais e sem o uso de travessões longos. Utilize hífen simples (`-`) ou pontuação convencional.
-2. **Transações Seguras:** Toda escrita no banco de dados deve utilizar bloco `try/except` com `db.session.rollback()` no tratamento de exceções.
-3. **Idempotência:** A reimportação de uma mesma campanha deve substituir os dados antigos de forma limpa, evitando erros de violação de chave primária ou única.
-4. **Código Limpo:** Mantenha comentários descritivos em português, nomes de variáveis autoexplicativos e funções desacopladas por responsabilidade única.
+2. **Transações Seguras:** Toda escrita no banco de dados (quando aplicável) deve utilizar bloco `try/except` com `db.session.rollback()` no tratamento de exceções.
+3. **Idempotência:** A reimportação de uma mesma campanha deve substituir os dados anteriores de mesmo código de forma limpa na sessão.
+4. **Código Limpo:** Mantenha comentários descritivos em português apenas em partes, funções e classes importantes, nomes de variáveis autoexplicativos e funções desacopladas por responsabilidade única.

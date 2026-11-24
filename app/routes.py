@@ -1,7 +1,7 @@
-from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, make_response
 from app import app
-from app.models import Laudo
 from app.services import (
+    listar_laudos_sessao,
     importar_relatorio_excel,
     importar_relatorio_pdf,
     obter_contexto_relatorio,
@@ -14,8 +14,8 @@ from app.services import (
 
 @app.route('/')
 def index():
-    """Exibe a pagina inicial de importacao de planilhas Excel e o historico salvo."""
-    campanhas = Laudo.query.order_by(Laudo.data_coleta.desc()).all()
+    """Exibe a pagina inicial de importacao de planilhas Excel e as campanhas da sessao."""
+    campanhas = listar_laudos_sessao(ordem_desc=True)
     return render_template('index.html', campanhas=campanhas)
 
 
@@ -39,17 +39,15 @@ def importar():
         resultado = importar_relatorio_excel(arquivo, nome_arquivo=arquivo.filename)
         return render_template('relatorio.html', resultado=resultado)
     except Exception as e:
-        from app import db
-        db.session.rollback()
         flash(f"Nao foi possivel processar a planilha: {e}", "error")
         return redirect(url_for('index'))
 
 
 @app.route('/importar-pdf', methods=['GET', 'POST'])
 def importar_pdf():
-    """Exibe a tela de leitura de PDF (GET) ou extrai, persiste e analisa o laudo enviado (POST)."""
+    """Exibe a tela de leitura de PDF (GET) ou extrai e analisa o laudo enviado (POST)."""
     if request.method == 'GET':
-        campanhas = Laudo.query.order_by(Laudo.data_coleta.desc()).all()
+        campanhas = listar_laudos_sessao(ordem_desc=True)
         return render_template('importar_pdf.html', campanhas=campanhas)
 
     if 'arquivo_pdf' not in request.files:
@@ -69,8 +67,6 @@ def importar_pdf():
         resultado = importar_relatorio_pdf(arquivo, nome_arquivo=arquivo.filename)
         return render_template('relatorio.html', resultado=resultado)
     except Exception as e:
-        from app import db
-        db.session.rollback()
         flash(f"Não foi possível processar o laudo em PDF: {e}", "error")
         return redirect(url_for('importar_pdf'))
 
@@ -81,7 +77,9 @@ def dashboard():
     campanha = request.args.get('campanha', 'todas')
     parametro = request.args.get('parametro', '')
     dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
-    return render_template('dashboard.html', dados=dados)
+    resp = make_response(render_template('dashboard.html', dados=dados))
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.route('/api/dashboard')
@@ -90,7 +88,9 @@ def api_dashboard():
     campanha = request.args.get('campanha', 'todas')
     parametro = request.args.get('parametro', '')
     dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
-    return jsonify(dados)
+    resp = make_response(jsonify(dados))
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.route('/relatorio/<codigo_laudo>')

@@ -1,19 +1,81 @@
 import io
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, date
-from decimal import Decimal, ROUND_HALF_UP
-from flask import render_template
+from types import SimpleNamespace
+from flask import abort, render_template
 import pandas as pd
 import pypdf
 from xhtml2pdf import pisa
-from app import db
 from app.models import (
-    Laudo,
-    ResultadoAnalise,
-    EficienciaETE,
     LimiteLegal,
     normalizar_texto,
 )
+
+
+@dataclass
+class MedicaoSessao:
+    """Representa uma medicao individual mantida em memoria durante a sessao do servidor."""
+    codigo_laudo: str
+    data_coleta: date
+    ponto_coleta: str
+    parametro_id: int | None
+    parametro: str
+    valor_medido: float | None
+    valor_texto: str | None
+    unidade: str
+    status_conformidade: str
+    em_conformidade: bool | None
+    norma_violada: str | None
+    alerta: str | None
+    norma_mais_restritiva: str | None = None
+
+    @property
+    def limite_ref(self):
+        if not self.norma_mais_restritiva:
+            return None
+        return SimpleNamespace(norma_mais_restritiva=self.norma_mais_restritiva)
+
+
+@dataclass
+class EficienciaSessao:
+    """Representa uma taxa de remocao (P1 vs P2) mantida em memoria na sessao atual."""
+    codigo_laudo: str
+    data_referencia: date
+    parametro: str
+    unidade: str
+    entrada_p1: float
+    saida_p2: float
+    eficiencia_percentual: float
+    avaliacao: str
+    atingiu_meta: bool | None
+
+
+@dataclass
+class LaudoSessao:
+    """Agrupa os dados de uma campanha importada em memoria sem gravar estado no SQLite."""
+    codigo_laudo: str
+    unidade_monitorada: str
+    corpo_receptor: str
+    campanha_mes: str
+    data_coleta: date
+    laboratorio: str
+    arquivo_origem: str
+    observacoes: str
+    medicoes: list = field(default_factory=list)
+    eficiencias: list = field(default_factory=list)
+
+
+_LAUDOS_SESSAO: dict[str, LaudoSessao] = {}
+
+
+def listar_laudos_sessao(ordem_desc: bool = True) -> list:
+    """Retorna as campanhas importadas na sessao atual ordenadas por data de coleta."""
+    return sorted(
+        _LAUDOS_SESSAO.values(),
+        key=lambda l: (l.data_coleta, l.campanha_mes, l.codigo_laudo),
+        reverse=ordem_desc,
+    )
 
 # Sinonimos para identificar nomes de colunas comuns em planilhas laboratoriais
 MAPA_COLUNAS_EXCEL = {
@@ -141,12 +203,13 @@ def padronizar_dataframe_pandas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def calcular_eficiencias_campanha(df_mes: pd.DataFrame, laudo_id: int, codigo_laudo: str, data_ref: date) -> list:
+def calcular_eficiencias_campanha(df_mes: pd.DataFrame, codigo_laudo: str, data_ref: date) -> tuple:
     """
     Calcula a eficiencia ((P1 - P2) / P1) * 100 para parametros que tenham
     medicao tanto no bruto quanto no tratado naquele mes.
     """
-    eficiencias_salvas = []
+    eficiencias_dicts = []
+    eficiencias_objs = []
     df_p1 = df_mes[df_mes['codigo_ponto'] == 'P1'].set_index('parametro_normalizado')
     df_p2 = df_mes[df_mes['codigo_ponto'] == 'P2'].set_index('parametro_normalizado')
 
@@ -169,8 +232,7 @@ def calcular_eficiencias_campanha(df_mes: pd.DataFrame, laudo_id: int, codigo_la
 
             avaliacao_ef = regra_param.avaliar_eficiencia(v1, v2)
 
-            ef_obj = EficienciaETE(
-                laudo_id=laudo_id,
+            ef_obj = EficienciaSessao(
                 codigo_laudo=codigo_laudo,
                 data_referencia=data_ref,
                 parametro=regra_param.parametro if regra_param else nome_param,
@@ -181,8 +243,8 @@ def calcular_eficiencias_campanha(df_mes: pd.DataFrame, laudo_id: int, codigo_la
                 avaliacao=avaliacao_ef['avaliacao'],
                 atingiu_meta=avaliacao_ef['atingiu_meta']
             )
-            db.session.add(ef_obj)
-            eficiencias_salvas.append({
+            eficiencias_objs.append(ef_obj)
+            eficiencias_dicts.append({
                 'parametro': ef_obj.parametro,
                 'entrada_p1': v1,
                 'saida_p2': v2,
@@ -192,7 +254,7 @@ def calcular_eficiencias_campanha(df_mes: pd.DataFrame, laudo_id: int, codigo_la
                 'atingiu_meta': avaliacao_ef['atingiu_meta']
             })
 
-    return eficiencias_salvas
+    return eficiencias_dicts, eficiencias_objs
 
 
 def classificar_impacto_rio(regra, nome_param: str, v3: float, v4: float, unidade: str, v2: float = None) -> dict:
@@ -342,130 +404,112 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
         'relatorios_por_mes': {}
     }
 
-    try:
-        # Processa cada mes encontrado na planilha
-        for mes in sorted(df['mes_referencia'].unique()):
-            df_mes = df[df['mes_referencia'] == mes]
-            data_coleta_mes = df_mes['data_coleta'].dropna().iloc[0].date() if not df_mes['data_coleta'].isna().all() else date.today()
-            codigo_campanha = f"CAMP-{mes}"
+    novos_laudos = {}
 
-            # Se ja existir a campanha daquele mes, remove previamente com commit para garantir a limpeza no SQLite
-            laudos_antigos = Laudo.query.filter_by(codigo_laudo=codigo_campanha).all()
-            if laudos_antigos:
-                ids_antigos = [l.id for l in laudos_antigos]
-                ResultadoAnalise.query.filter(
-                    (ResultadoAnalise.codigo_laudo == codigo_campanha) |
-                    (ResultadoAnalise.laudo_id.in_(ids_antigos))
-                ).delete(synchronize_session=False)
-                EficienciaETE.query.filter(
-                    (EficienciaETE.codigo_laudo == codigo_campanha) |
-                    (EficienciaETE.laudo_id.in_(ids_antigos))
-                ).delete(synchronize_session=False)
-                for l in laudos_antigos:
-                    db.session.delete(l)
-                db.session.commit()
+    for mes in sorted(df['mes_referencia'].unique()):
+        df_mes = df[df['mes_referencia'] == mes]
+        data_coleta_mes = df_mes['data_coleta'].dropna().iloc[0].date() if not df_mes['data_coleta'].isna().all() else date.today()
+        codigo_campanha = f"CAMP-{mes}"
 
-            novo_laudo = Laudo(
+        eficiencias_mes, eficiencias_objs = calcular_eficiencias_campanha(df_mes, codigo_campanha, data_coleta_mes)
+        eficiencias_map = {e['parametro']: e['eficiencia_pct'] for e in eficiencias_mes}
+
+        medicoes_mes = []
+        alertas_mes = []
+
+        for _, row in df_mes.iterrows():
+            nome_param = str(row['parametro']).strip()
+            ponto = str(row['codigo_ponto']).strip().upper()
+            val_num = row['resultado_num']
+            val_txt = row['resultado_txt']
+            unidade = str(row['unidade']).strip()
+
+            regra_param = LimiteLegal.buscar_por_nome(nome_param)
+
+            status_conf = "Informativo"
+            em_conf = None
+            norma_violada = None
+            alerta_texto = None
+
+            # Avalia limites no Efluente Tratado (P2), incluindo eficiencia de remocao quando aplicavel
+            if ponto == 'P2' and regra_param:
+                ef_param = eficiencias_map.get(regra_param.parametro)
+                avaliacao = regra_param.avaliar_p2(val_num, eficiencia_pct=ef_param)
+                status_conf = avaliacao['status_conformidade']
+                em_conf = avaliacao['em_conformidade']
+                norma_violada = avaliacao['norma_violada']
+                alerta_texto = avaliacao['alerta']
+
+                if status_conf == "Não Conforme":
+                    alertas_mes.append({
+                        'mes': mes,
+                        'ponto': ponto,
+                        'parametro': regra_param.parametro,
+                        'valor': val_num,
+                        'unidade': unidade,
+                        'norma_violada': norma_violada,
+                        'mensagem': alerta_texto
+                    })
+
+            medicao = MedicaoSessao(
                 codigo_laudo=codigo_campanha,
-                unidade_monitorada=metadados['unidade_monitorada'],
-                corpo_receptor=metadados['corpo_receptor'],
-                campanha_mes=mes,
                 data_coleta=data_coleta_mes,
-                laboratorio=metadados['laboratorio'],
-                arquivo_origem=nome_arquivo,
-                observacoes=metadados['observacoes']
+                ponto_coleta=ponto,
+                parametro_id=regra_param.id if regra_param else None,
+                parametro=regra_param.parametro if regra_param else nome_param,
+                valor_medido=val_num,
+                valor_texto=val_txt,
+                unidade=unidade,
+                status_conformidade=status_conf,
+                em_conformidade=em_conf,
+                norma_violada=norma_violada,
+                alerta=alerta_texto,
+                norma_mais_restritiva=regra_param.norma_mais_restritiva if regra_param else None,
             )
-            db.session.add(novo_laudo)
-            db.session.flush()
+            medicoes_mes.append(medicao)
 
-            eficiencias_mes = calcular_eficiencias_campanha(df_mes, novo_laudo.id, codigo_campanha, data_coleta_mes)
-            eficiencias_map = {e['parametro']: e['eficiencia_pct'] for e in eficiencias_mes}
+        novos_laudos[codigo_campanha] = LaudoSessao(
+            codigo_laudo=codigo_campanha,
+            unidade_monitorada=metadados['unidade_monitorada'],
+            corpo_receptor=metadados['corpo_receptor'],
+            campanha_mes=mes,
+            data_coleta=data_coleta_mes,
+            laboratorio=metadados['laboratorio'],
+            arquivo_origem=nome_arquivo,
+            observacoes=metadados['observacoes'],
+            medicoes=medicoes_mes,
+            eficiencias=eficiencias_objs,
+        )
 
-            medicoes_mes = []
-            alertas_mes = []
+        impactos_rio_mes = avaliar_impacto_corpo_receptor(df_mes)
 
-            for _, row in df_mes.iterrows():
-                nome_param = str(row['parametro']).strip()
-                ponto = str(row['codigo_ponto']).strip().upper()
-                val_num = row['resultado_num']
-                val_txt = row['resultado_txt']
-                unidade = str(row['unidade']).strip()
+        resultado_processamento['campanhas_processadas'].append(mes)
+        resultado_processamento['total_alertas'] += len(alertas_mes)
+        resultado_processamento['alertas'].extend(alertas_mes)
+        resultado_processamento['eficiencias'].extend([{**e, 'mes': mes} for e in eficiencias_mes])
+        resultado_processamento['impactos_rio'].extend([{**i, 'mes': mes} for i in impactos_rio_mes])
 
-                regra_param = LimiteLegal.buscar_por_nome(nome_param)
+        resultado_processamento['relatorios_por_mes'][mes] = {
+            'codigo_laudo': codigo_campanha,
+            'data_coleta': data_coleta_mes.strftime('%d/%m/%Y'),
+            'total_medicoes': len(medicoes_mes),
+            'alertas': alertas_mes,
+            'eficiencias': eficiencias_mes,
+            'impactos_rio': impactos_rio_mes
+        }
 
-                status_conf = "Informativo"
-                em_conf = None
-                norma_violada = None
-                alerta_texto = None
-
-                # Avalia limites no Efluente Tratado (P2), incluindo eficiencia de remocao quando aplicavel
-                if ponto == 'P2' and regra_param:
-                    ef_param = eficiencias_map.get(regra_param.parametro)
-                    avaliacao = regra_param.avaliar_p2(val_num, eficiencia_pct=ef_param)
-                    status_conf = avaliacao['status_conformidade']
-                    em_conf = avaliacao['em_conformidade']
-                    norma_violada = avaliacao['norma_violada']
-                    alerta_texto = avaliacao['alerta']
-
-                    if status_conf == "Não Conforme":
-                        alertas_mes.append({
-                            'mes': mes,
-                            'ponto': ponto,
-                            'parametro': regra_param.parametro,
-                            'valor': val_num,
-                            'unidade': unidade,
-                            'norma_violada': norma_violada,
-                            'mensagem': alerta_texto
-                        })
-
-                medicao = ResultadoAnalise(
-                    laudo_id=novo_laudo.id,
-                    codigo_laudo=codigo_campanha,
-                    data_coleta=data_coleta_mes,
-                    ponto_coleta=ponto,
-                    parametro_id=regra_param.id if regra_param else None,
-                    parametro=regra_param.parametro if regra_param else nome_param,
-                    valor_medido=val_num,
-                    valor_texto=val_txt,
-                    unidade=unidade,
-                    status_conformidade=status_conf,
-                    em_conformidade=em_conf,
-                    norma_violada=norma_violada,
-                    alerta=alerta_texto
-                )
-                db.session.add(medicao)
-                medicoes_mes.append(medicao)
-
-            impactos_rio_mes = avaliar_impacto_corpo_receptor(df_mes)
-
-            resultado_processamento['campanhas_processadas'].append(mes)
-            resultado_processamento['total_alertas'] += len(alertas_mes)
-            resultado_processamento['alertas'].extend(alertas_mes)
-            resultado_processamento['eficiencias'].extend([{**e, 'mes': mes} for e in eficiencias_mes])
-            resultado_processamento['impactos_rio'].extend([{**i, 'mes': mes} for i in impactos_rio_mes])
-
-            resultado_processamento['relatorios_por_mes'][mes] = {
-                'codigo_laudo': codigo_campanha,
-                'data_coleta': data_coleta_mes.strftime('%d/%m/%Y'),
-                'total_medicoes': len(medicoes_mes),
-                'alertas': alertas_mes,
-                'eficiencias': eficiencias_mes,
-                'impactos_rio': impactos_rio_mes
-            }
-
-        db.session.commit()
-        return resultado_processamento
-    except Exception as e:
-        db.session.rollback()
-        raise e
+    _LAUDOS_SESSAO.update(novos_laudos)
+    return resultado_processamento
 
 
 def obter_contexto_relatorio(codigo_laudo: str) -> dict:
     """
-    Recupera os dados completos de uma campanha mensal gravada no banco de dados.
+    Recupera os dados completos de uma campanha carregada na sessao atual.
     Reaproveitado tanto para a tela HTML quanto para a geracao do relatorio em PDF.
     """
-    laudo = Laudo.query.filter_by(codigo_laudo=codigo_laudo).first_or_404()
+    laudo = _LAUDOS_SESSAO.get(codigo_laudo)
+    if not laudo:
+        abort(404)
     medicoes_p2 = [m for m in laudo.medicoes if m.ponto_coleta == 'P2']
     medicoes_p3 = [m for m in laudo.medicoes if m.ponto_coleta == 'P3']
     medicoes_p4 = [m for m in laudo.medicoes if m.ponto_coleta == 'P4']
@@ -484,7 +528,7 @@ def obter_contexto_relatorio(codigo_laudo: str) -> dict:
             v4 = m4.valor_medido or 0.0
             v2 = p2_map[param_nome].valor_medido if param_nome in p2_map else None
 
-            regra = m4.limite_ref or LimiteLegal.buscar_por_nome(param_nome)
+            regra = LimiteLegal.buscar_por_nome(param_nome)
             impactos_rio.append(classificar_impacto_rio(regra, param_nome, v3, v4, m4.unidade, v2=v2))
 
     return {
@@ -1092,90 +1136,71 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
 
 def importar_relatorio_pdf(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
     """
-    Executa a leitura automática do PDF e persiste a campanha e suas medições
-    no banco de dados SQLite, com proteção transacional contra chaves duplicadas.
+    Executa a leitura automatica do PDF e carrega a campanha na sessao em memoria,
+    substituindo eventual leitura anterior de mesmo codigo sem gravar estado em disco.
     """
     dados = extrair_dados_pdf_laudo(origem_pdf, nome_arquivo)
     codigo_campanha = dados['codigo_laudo']
     mes_referencia = dados['mes_referencia']
     data_coleta = dados['data_coleta']
 
-    try:
-        # Limpeza prévia para garantir idempotência caso o laudo do mês já exista
-        laudos_antigos = Laudo.query.filter_by(codigo_laudo=codigo_campanha).all()
-        if laudos_antigos:
-            ids_antigos = [l.id for l in laudos_antigos]
-            ResultadoAnalise.query.filter(
-                (ResultadoAnalise.codigo_laudo == codigo_campanha) |
-                (ResultadoAnalise.laudo_id.in_(ids_antigos))
-            ).delete(synchronize_session=False)
-            EficienciaETE.query.filter(
-                (EficienciaETE.codigo_laudo == codigo_campanha) |
-                (EficienciaETE.laudo_id.in_(ids_antigos))
-            ).delete(synchronize_session=False)
-            for l in laudos_antigos:
-                db.session.delete(l)
-            db.session.commit()
+    regras_por_id = {r.id: r.norma_mais_restritiva for r in LimiteLegal.query.all()}
 
-        novo_laudo = Laudo(
+    medicoes_objs = [
+        MedicaoSessao(
             codigo_laudo=codigo_campanha,
-            unidade_monitorada=dados['unidade_monitorada'],
-            corpo_receptor=dados['corpo_receptor'],
-            campanha_mes=mes_referencia,
             data_coleta=data_coleta,
-            laboratorio=dados['laboratorio'],
-            arquivo_origem=nome_arquivo,
-            observacoes="Laudo importado automaticamente via módulo de extração PDF."
+            ponto_coleta=m['ponto_coleta'],
+            parametro_id=m['parametro_id'],
+            parametro=m['parametro'],
+            valor_medido=m['valor_medido'],
+            valor_texto=m['valor_texto'],
+            unidade=m['unidade'],
+            status_conformidade=m['status_conformidade'],
+            em_conformidade=m['em_conformidade'],
+            norma_violada=m['norma_violada'],
+            alerta=m['alerta'],
+            norma_mais_restritiva=regras_por_id.get(m['parametro_id']),
         )
-        db.session.add(novo_laudo)
-        db.session.flush()
+        for m in dados['medicoes']
+    ]
 
-        for m in dados['medicoes']:
-            medicao = ResultadoAnalise(
-                laudo_id=novo_laudo.id,
-                codigo_laudo=codigo_campanha,
-                data_coleta=data_coleta,
-                ponto_coleta=m['ponto_coleta'],
-                parametro_id=m['parametro_id'],
-                parametro=m['parametro'],
-                valor_medido=m['valor_medido'],
-                valor_texto=m['valor_texto'],
-                unidade=m['unidade'],
-                status_conformidade=m['status_conformidade'],
-                em_conformidade=m['em_conformidade'],
-                norma_violada=m['norma_violada'],
-                alerta=m['alerta']
-            )
-            db.session.add(medicao)
+    eficiencias_objs = [
+        EficienciaSessao(
+            codigo_laudo=codigo_campanha,
+            data_referencia=data_coleta,
+            parametro=ef['parametro'],
+            unidade=ef['unidade'],
+            entrada_p1=ef['entrada_p1'],
+            saida_p2=ef['saida_p2'],
+            eficiencia_percentual=ef['eficiencia_pct'],
+            avaliacao=ef['avaliacao'],
+            atingiu_meta=ef['atingiu_meta'],
+        )
+        for ef in dados['eficiencias']
+    ]
 
-        for ef in dados['eficiencias']:
-            ef_obj = EficienciaETE(
-                laudo_id=novo_laudo.id,
-                codigo_laudo=codigo_campanha,
-                data_referencia=data_coleta,
-                parametro=ef['parametro'],
-                unidade=ef['unidade'],
-                entrada_p1=ef['entrada_p1'],
-                saida_p2=ef['saida_p2'],
-                eficiencia_percentual=ef['eficiencia_pct'],
-                avaliacao=ef['avaliacao'],
-                atingiu_meta=ef['atingiu_meta']
-            )
-            db.session.add(ef_obj)
-
-        db.session.commit()
-        return dados
-    except Exception as e:
-        db.session.rollback()
-        raise e
+    _LAUDOS_SESSAO[codigo_campanha] = LaudoSessao(
+        codigo_laudo=codigo_campanha,
+        unidade_monitorada=dados['unidade_monitorada'],
+        corpo_receptor=dados['corpo_receptor'],
+        campanha_mes=mes_referencia,
+        data_coleta=data_coleta,
+        laboratorio=dados['laboratorio'],
+        arquivo_origem=nome_arquivo,
+        observacoes="Laudo importado automaticamente via módulo de extração PDF.",
+        medicoes=medicoes_objs,
+        eficiencias=eficiencias_objs,
+    )
+    return dados
 
 
 def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = None) -> dict:
     """
-    Agrega os indicadores ambientais de todas as campanhas gravadas no SQLite
+    Agrega os indicadores ambientais das campanhas carregadas na sessao em memoria
     para alimentar o Dashboard Ambiental (KPIs, graficos dinamicos e painel de alertas).
     """
-    todos_laudos = Laudo.query.order_by(Laudo.data_coleta.asc(), Laudo.campanha_mes.asc()).all()
+    todos_laudos = listar_laudos_sessao(ordem_desc=False)
 
     if not todos_laudos:
         return {
@@ -1272,7 +1297,7 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
             m3 = p3_map[param_nome]
             m4 = p4_map[param_nome]
             v2 = p2_map[param_nome].valor_medido if param_nome in p2_map else None
-            regra = m4.limite_ref or LimiteLegal.buscar_por_nome(param_nome)
+            regra = LimiteLegal.buscar_por_nome(param_nome)
             imp = classificar_impacto_rio(regra, param_nome, m3.valor_medido, m4.valor_medido, m4.unidade, v2=v2)
             impactos_l.append(imp)
         impactos_por_laudo[l.codigo_laudo] = impactos_l
@@ -1442,43 +1467,12 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
 
 
 def excluir_laudo(codigo_laudo: str) -> bool:
-    """
-    Remove um laudo especifico e todas as suas medicoes e eficiencias do SQLite.
-    Mantem intactas as tabelas de referencia (pontos, legislacoes e limites legais).
-    """
-    laudo = Laudo.query.filter_by(codigo_laudo=codigo_laudo).first()
-    if not laudo:
-        return False
-
-    try:
-        ResultadoAnalise.query.filter(
-            (ResultadoAnalise.codigo_laudo == codigo_laudo) |
-            (ResultadoAnalise.laudo_id == laudo.id)
-        ).delete(synchronize_session=False)
-        EficienciaETE.query.filter(
-            (EficienciaETE.codigo_laudo == codigo_laudo) |
-            (EficienciaETE.laudo_id == laudo.id)
-        ).delete(synchronize_session=False)
-        db.session.delete(laudo)
-        db.session.commit()
-        return True
-    except Exception as e:
-        db.session.rollback()
-        raise e
+    """Remove uma campanha especifica da sessao em memoria."""
+    return _LAUDOS_SESSAO.pop(codigo_laudo, None) is not None
 
 
 def limpar_todos_laudos() -> int:
-    """
-    Remove todos os laudos, medicoes e eficiencias importados do banco local,
-    preservando os pontos de coleta, legislacoes e limites legais cadastrados.
-    """
-    try:
-        total = Laudo.query.count()
-        ResultadoAnalise.query.delete(synchronize_session=False)
-        EficienciaETE.query.delete(synchronize_session=False)
-        Laudo.query.delete(synchronize_session=False)
-        db.session.commit()
-        return total
-    except Exception as e:
-        db.session.rollback()
-        raise e
+    """Limpa todas as campanhas carregadas na sessao em memoria."""
+    total = len(_LAUDOS_SESSAO)
+    _LAUDOS_SESSAO.clear()
+    return total
