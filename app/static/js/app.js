@@ -1,8 +1,86 @@
 document.addEventListener('DOMContentLoaded', function () {
+    initPageLoader();
+    initFlashAlerts();
     initDropzone('arquivo-excel', 'dropzone-excel', 'file-card-excel', 'file-name-excel', 'file-size-excel', 'btn-clear-excel');
     initDropzone('arquivo-pdf', 'dropzone-pdf', 'file-card-pdf', 'file-name-pdf', 'file-size-pdf', 'btn-clear-pdf');
     initTableFilters();
     initUploadSubmitFeedback();
+
+    /**
+     * Controla o overlay de carregamento durante navegacao entre paginas,
+     * envio de formularios e atualizacoes dinamicas via API.
+     */
+    function initPageLoader() {
+        const overlay = document.getElementById('page-loader');
+        if (!overlay) return;
+
+        let hideTimer = null;
+
+        function show() {
+            clearTimeout(hideTimer);
+            overlay.hidden = false;
+            overlay.setAttribute('aria-busy', 'true');
+            overlay.classList.add('visible');
+        }
+
+        function hide(suave) {
+            clearTimeout(hideTimer);
+            sessionStorage.removeItem('ete_nav_loading');
+            overlay.classList.remove('visible');
+            overlay.setAttribute('aria-busy', 'false');
+            if (suave) {
+                hideTimer = setTimeout(() => {
+                    overlay.hidden = true;
+                }, 200);
+            } else {
+                overlay.hidden = true;
+            }
+        }
+
+        window.EteLoader = { show, hide };
+
+        if (sessionStorage.getItem('ete_nav_loading') === '1') {
+            hideTimer = setTimeout(() => hide(true), 220);
+        }
+
+        document.addEventListener('click', function (e) {
+            if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                return;
+            }
+            const link = e.target.closest('a[href]');
+            if (!link) return;
+            const href = link.getAttribute('href') || '';
+            if (
+                !href ||
+                href.startsWith('#') ||
+                href.startsWith('javascript:') ||
+                link.hasAttribute('download') ||
+                link.target === '_blank' ||
+                href.endsWith('/pdf')
+            ) {
+                return;
+            }
+            try {
+                const url = new URL(link.href, window.location.origin);
+                if (url.origin !== window.location.origin) return;
+                if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+            } catch (_err) {
+                return;
+            }
+            sessionStorage.setItem('ete_nav_loading', '1');
+            show();
+        });
+
+        document.addEventListener('submit', function (e) {
+            if (e.defaultPrevented) return;
+            sessionStorage.setItem('ete_nav_loading', '1');
+            show();
+        });
+
+        window.addEventListener('pageshow', function (e) {
+            if (e.persisted) hide(false);
+        });
+    }
 
     /**
      * Configura uma area de upload com suporte a drag-and-drop, pre-visualizacao
@@ -108,6 +186,23 @@ document.addEventListener('DOMContentLoaded', function () {
                         next.style.display = visivel ? '' : 'none';
                     }
                 });
+            });
+        });
+    }
+
+    /**
+     * Permite fechar os alertas flash da pagina com transicao suave ao clicar no botao X.
+     */
+    function initFlashAlerts() {
+        document.querySelectorAll('[data-flash-dismiss]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const alerta = btn.closest('[data-flash-alert]');
+                if (!alerta) return;
+                alerta.style.opacity = '0';
+                alerta.style.transform = 'translateY(-4px)';
+                setTimeout(function () {
+                    alerta.remove();
+                }, 180);
             });
         });
     }

@@ -30,6 +30,7 @@
 
         <div class="station-card-body">
             <form action="{{ url_for('importar_pdf') }}" method="POST" enctype="multipart/form-data" data-upload-form data-loading-text="Processando laudo PDF...">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 
                 <div id="dropzone-pdf" class="industrial-dropzone">
                     <input type="file" name="arquivo_pdf" id="arquivo-pdf" accept=".pdf" required
@@ -53,23 +54,23 @@
                     </div>
                 </div>
 
-                <div id="file-card-pdf" class="file-selected-card">
-                    <div class="flex items-center space-x-3">
-                        <span class="w-7 h-7 rounded bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold">
+                <div id="file-card-pdf" class="file-selected-card gap-3">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <span class="w-7 h-7 rounded bg-[#971E84]/10 text-[#971E84] flex items-center justify-center font-mono text-xs font-bold shrink-0">
                             PDF
                         </span>
-                        <div>
-                            <p id="file-name-pdf" class="text-xs font-bold text-slate-900 font-mono">laudo.pdf</p>
+                        <div class="min-w-0">
+                            <p id="file-name-pdf" class="text-xs font-bold text-slate-900 font-mono truncate">laudo.pdf</p>
                             <p id="file-size-pdf" class="text-[11px] text-slate-500 font-mono">0 KB</p>
                         </div>
                     </div>
-                    <button type="button" id="btn-clear-pdf" class="text-xs font-mono text-slate-400 hover:text-rose-600 transition-colors px-2 py-1">
+                    <button type="button" id="btn-clear-pdf" class="text-xs font-mono text-slate-400 hover:text-rose-600 transition-colors px-2 py-1 shrink-0">
                         Trocar arquivo
                     </button>
                 </div>
 
                 <div class="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div class="flex items-center space-x-2 text-[11px] font-mono text-slate-500">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono text-slate-500">
                         <span>Padrões:</span>
                         <span class="text-slate-700">CONAMA 430</span>
                         <span>•</span>
@@ -78,7 +79,7 @@
                         <span class="text-slate-700">CONAMA 357 (Cl. 2)</span>
                     </div>
 
-                    <button type="submit" class="btn-industrial-primary self-end sm:self-auto">
+                    <button type="submit" class="btn-industrial-primary w-full sm:w-auto justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="20 6 9 17 4 12"/>
                         </svg>
@@ -141,6 +142,7 @@
                 </span>
                 <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
                       onsubmit="return confirm('Deseja excluir todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros cadastrados serão mantidos.');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="origem" value="importar_pdf">
                     <button type="submit" class="btn-industrial-danger py-1 px-2.5 text-[11px]">
                         Limpar histórico
@@ -184,6 +186,7 @@
                             <span class="text-slate-300">|</span>
                             <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
                                   onsubmit="return confirm('Deseja excluir o laudo {{ c.codigo_laudo }}?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="origem" value="importar_pdf">
                                 <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">
                                     Excluir

@@ -15,6 +15,10 @@ os.makedirs(instance_dir, exist_ok=True)
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-hackathon-evonik-etec')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'SQLALCHEMY_DATABASE_URI',
     f"sqlite:///{os.path.join(instance_dir, 'monitoramento.db')}"

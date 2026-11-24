@@ -21,12 +21,12 @@
         </div>
 
         {% if dados.possui_dados %}
-        <div class="flex flex-wrap items-end gap-2.5">
-            <div>
+        <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-2.5 w-full lg:w-auto">
+            <div class="w-full sm:w-auto min-w-0">
                 <label for="filtro-campanha" class="block text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">
                     Campanha / Mês
                 </label>
-                <select id="filtro-campanha" class="table-search-input">
+                <select id="filtro-campanha" class="table-search-input w-full sm:w-auto max-w-full">
                     <option value="todas" {% if dados.filtros.campanha_selecionada == 'todas' %}selected{% endif %}>
                         Todas as campanhas ({{ dados.filtros.campanhas_disponiveis|length }})
                     </option>
@@ -38,11 +38,11 @@
                 </select>
             </div>
 
-            <div>
+            <div class="w-full sm:w-auto min-w-0">
                 <label for="filtro-parametro" class="block text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">
                     Parâmetro (Série P2)
                 </label>
-                <select id="filtro-parametro" class="table-search-input">
+                <select id="filtro-parametro" class="table-search-input w-full sm:w-auto max-w-full">
                     {% for p in dados.filtros.parametros_p2_disponiveis %}
                     <option value="{{ p }}" {% if dados.filtros.parametro_selecionado == p %}selected{% endif %}>
                         {{ p }}
@@ -51,10 +51,11 @@
                 </select>
             </div>
 
-            <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
+            <form action="{{ url_for('limpar_laudos_rota') }}" method="POST" class="w-full sm:w-auto"
                   onsubmit="return confirm('Deseja limpar todas as campanhas carregadas na sessão atual?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="origem" value="dashboard">
-                <button type="submit" class="btn-industrial-danger">
+                <button type="submit" class="btn-industrial-danger w-full sm:w-auto justify-center">
                     Limpar dados
                 </button>
             </form>
@@ -88,6 +89,22 @@
         </div>
     </div>
     {% else %}
+
+    <div id="dashboard-api-erro" class="hidden p-3.5 rounded-lg border bg-rose-50 border-rose-200 text-rose-800 text-xs font-medium flex items-center justify-between gap-3" role="alert">
+        <div class="flex items-center space-x-2">
+            <span class="font-bold">[ERRO]</span>
+            <span id="dashboard-api-erro-texto">Não foi possível atualizar os indicadores do dashboard.</span>
+        </div>
+        <button type="button"
+                onclick="document.getElementById('dashboard-api-erro').classList.add('hidden')"
+                aria-label="Fechar alerta"
+                class="p-1 rounded text-rose-500 hover:text-rose-800 hover:bg-rose-100 transition-colors shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </button>
+    </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="telemetry-card">
@@ -371,6 +388,7 @@
                             <span class="text-slate-300">|</span>
                             <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
                                   onsubmit="return confirm('Deseja excluir a campanha {{ c.codigo_laudo }}?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="origem" value="dashboard">
                                 <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">
                                     Excluir
@@ -828,14 +846,30 @@
             const campanha = document.getElementById('filtro-campanha').value;
             const parametro = document.getElementById('filtro-parametro').value;
             const params = new URLSearchParams({ campanha, parametro });
+            const alertaErro = document.getElementById('dashboard-api-erro');
+            const textoErro = document.getElementById('dashboard-api-erro-texto');
+            const inicio = Date.now();
+            if (alertaErro) alertaErro.classList.add('hidden');
+            if (window.EteLoader) window.EteLoader.show();
             try {
                 const resp = await fetch(`${urlApiDashboard}?${params.toString()}`);
-                if (!resp.ok) return;
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}`);
+                }
                 const novosDados = await resp.json();
                 atualizarKpisEListas(novosDados);
                 renderizarGraficos(novosDados);
             } catch (err) {
                 console.error('Erro ao atualizar dashboard:', err);
+                if (textoErro) {
+                    textoErro.textContent = 'Não foi possível atualizar os indicadores do dashboard. Verifique se o servidor está ativo e tente novamente.';
+                }
+                if (alertaErro) alertaErro.classList.remove('hidden');
+            } finally {
+                if (window.EteLoader) {
+                    const restante = Math.max(0, 180 - (Date.now() - inicio));
+                    setTimeout(() => window.EteLoader.hide(true), restante);
+                }
             }
         }
 

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Erro {{ codigo }} - ETE Evonik{% endblock %}
+
+{% block content %}
+<div class="py-10 flex justify-center">
+    <div class="station-card max-w-xl w-full">
+        <div class="station-card-header">
+            <div class="flex items-center space-x-2">
+                <span class="stamp-badge {% if codigo == 404 %}stamp-atencao{% else %}stamp-violacao{% endif %}">
+                    ERRO {{ codigo }}
+                </span>
+                <span class="text-xs font-mono text-slate-500">Diagnóstico de Rota</span>
+            </div>
+        </div>
+
+        <div class="station-card-body py-8 text-center">
+            <div class="w-12 h-12 mx-auto rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-[#971E84] mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </div>
+
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight mb-2">
+                {{ titulo }}
+            </h1>
+            <p class="text-xs text-slate-600 max-w-md mx-auto leading-relaxed mb-6">
+                {{ descricao }}
+            </p>
+
+            <div class="flex flex-wrap items-center justify-center gap-3">
+                <a href="{{ url_for('index') }}" class="btn-industrial-primary">
+                    Ir para Relatório de Excel
+                </a>
+                <a href="{{ url_for('dashboard') }}" class="btn-industrial-secondary">
+                    Abrir Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
