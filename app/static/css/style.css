@@ -63,6 +63,7 @@
     align-items: center;
     gap: 6px;
     text-decoration: none;
+    white-space: nowrap;
 }
 
 .nav-segment-item:hover {
@@ -90,8 +91,10 @@
     background: #f8fafc;
     border-bottom: 1px solid var(--border-light);
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
 }
 
 .station-card-body {
@@ -199,6 +202,27 @@
     border-color: var(--border-strong);
 }
 
+.btn-industrial-danger {
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 7px;
+    border: 1px solid #fecaca;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+}
+
+.btn-industrial-danger:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+
 .lab-table {
     width: 100%;
     border-collapse: separate;
@@ -291,6 +315,7 @@
     font-family: 'JetBrains Mono', monospace;
     line-height: 1.2;
     margin-top: 4px;
+    font-variant-numeric: tabular-nums;
 }
 
 .telemetry-subtext {
@@ -298,4 +323,21 @@
     color: var(--text-subtle);
     font-family: 'JetBrains Mono', monospace;
     margin-top: 4px;
+}
+
+.table-search-input {
+    padding: 6px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border-light);
+    background: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-main);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.table-search-input:focus {
+    outline: none;
+    border-color: var(--evonik-primary);
+    box-shadow: 0 0 0 3px rgba(151, 30, 132, 0.1);
 }

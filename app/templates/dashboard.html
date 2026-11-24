@@ -1,0 +1,855 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard Ambiental - ETE Evonik{% endblock %}
+
+{% block content %}
+<div class="space-y-8 py-2">
+
+    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div class="max-w-2xl">
+            <div class="inline-flex items-center space-x-2 text-xs font-mono text-[#971E84] mb-2 font-semibold">
+                <span>MÓDULO DE TELEMETRIA</span>
+                <span class="text-slate-300">/</span>
+                <span class="text-slate-500 font-normal">DASHBOARD AMBIENTAL</span>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+                Dashboard Ambiental da ETE
+            </h1>
+            <p class="text-sm text-slate-600 mt-1.5 leading-relaxed">
+                Indicadores consolidados de conformidade legal, evolução de eficiência da ETE e monitoramento comparativo do Rio Piracicaba.
+            </p>
+        </div>
+
+        {% if dados.possui_dados %}
+        <div class="flex flex-wrap items-end gap-2.5">
+            <div>
+                <label for="filtro-campanha" class="block text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">
+                    Campanha / Mês
+                </label>
+                <select id="filtro-campanha" class="table-search-input">
+                    <option value="todas" {% if dados.filtros.campanha_selecionada == 'todas' %}selected{% endif %}>
+                        Todas as campanhas ({{ dados.filtros.campanhas_disponiveis|length }})
+                    </option>
+                    {% for c in dados.filtros.campanhas_disponiveis %}
+                    <option value="{{ c.codigo_laudo }}" {% if dados.filtros.campanha_selecionada == c.codigo_laudo %}selected{% endif %}>
+                        {{ c.campanha_mes }} - {{ c.codigo_laudo }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="filtro-parametro" class="block text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">
+                    Parâmetro (Série P2)
+                </label>
+                <select id="filtro-parametro" class="table-search-input">
+                    {% for p in dados.filtros.parametros_p2_disponiveis %}
+                    <option value="{{ p }}" {% if dados.filtros.parametro_selecionado == p %}selected{% endif %}>
+                        {{ p }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
+                  onsubmit="return confirm('Deseja limpar todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros legais serão mantidos.');">
+                <input type="hidden" name="origem" value="dashboard">
+                <button type="submit" class="btn-industrial-danger">
+                    Limpar dados
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if not dados.possui_dados %}
+    <div class="station-card max-w-2xl">
+        <div class="station-card-body py-10 text-center">
+            <div class="w-12 h-12 mx-auto rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-[#971E84] mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 3v18h18"/>
+                    <path d="M18 17V9"/>
+                    <path d="M13 17V5"/>
+                    <path d="M8 17v-3"/>
+                </svg>
+            </div>
+            <h2 class="text-lg font-bold text-slate-900 mb-1.5">Nenhuma campanha importada ainda</h2>
+            <p class="text-xs text-slate-500 max-w-md mx-auto mb-6 leading-relaxed">
+                Importe ao menos um laudo laboratorial em Excel ou PDF para gerar automaticamente os indicadores, gráficos históricos e alertas ambientais.
+            </p>
+            <div class="flex flex-wrap items-center justify-center gap-3">
+                <a href="{{ url_for('index') }}" class="btn-industrial-primary">
+                    Importar Planilha Excel
+                </a>
+                <a href="{{ url_for('importar_pdf') }}" class="btn-industrial-secondary">
+                    Importar Laudo PDF
+                </a>
+            </div>
+        </div>
+    </div>
+    {% else %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="telemetry-card">
+            <span class="telemetry-label">Conformidade Legal</span>
+            <div id="kpi-taxa-conformidade" class="telemetry-value text-[#971E84]">
+                {{ "%.1f"|format(dados.kpis.taxa_conformidade_pct) }}%
+            </div>
+            <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                <div id="kpi-barra-conformidade"
+                     class="bg-[#971E84] h-1.5 rounded-full transition-all duration-300"
+                     data-width="{{ dados.kpis.taxa_conformidade_pct }}"></div>
+            </div>
+            <div id="kpi-sub-conformidade" class="telemetry-subtext">
+                {{ dados.kpis.total_conformes_p2 }} de {{ dados.kpis.total_avaliadas_p2 }} parâmetros em P2
+            </div>
+        </div>
+
+        <div id="card-kpi-nconf" class="telemetry-card {% if dados.kpis.total_nao_conformes_p2 > 0 %}border-rose-300 bg-rose-50/20{% endif %}">
+            <span class="telemetry-label">Não Conformidades</span>
+            <div id="kpi-nao-conformes" class="telemetry-value {% if dados.kpis.total_nao_conformes_p2 > 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                {{ dados.kpis.total_nao_conformes_p2 }}
+            </div>
+            <div id="kpi-sub-nconf" class="telemetry-subtext">CONAMA 430 / Dec. SP 8.468</div>
+        </div>
+
+        <div id="card-kpi-rio" class="telemetry-card {% if dados.kpis.total_alertas_rio > 0 %}border-amber-300 bg-amber-50/20{% endif %}">
+            <span class="telemetry-label">Impactos no Rio</span>
+            <div id="kpi-alertas-rio" class="telemetry-value {% if dados.kpis.total_alertas_rio > 0 %}text-rose-600{% elif dados.kpis.total_atencao_rio > 0 %}text-amber-600{% else %}text-emerald-600{% endif %}">
+                {{ dados.kpis.total_alertas_rio }}
+            </div>
+            <div id="kpi-sub-rio" class="telemetry-subtext">
+                {{ dados.kpis.total_atencao_rio }} ponto(s) em atenção (&gt;= 20%)
+            </div>
+        </div>
+
+        <div class="telemetry-card">
+            <span class="telemetry-label">Eficiência DBO5,20</span>
+            <div id="kpi-eficiencia-dbo" class="telemetry-value text-slate-900">
+                {% if dados.kpis.eficiencia_media_dbo is not none %}{{ "%.1f"|format(dados.kpis.eficiencia_media_dbo) }}%{% else %}--{% endif %}
+            </div>
+            <div id="kpi-sub-eficiencia" class="telemetry-subtext">
+                DQO: {% if dados.kpis.eficiencia_media_dqo is not none %}{{ "%.1f"|format(dados.kpis.eficiencia_media_dqo) }}%{% else %}--{% endif %} |
+                SST: {% if dados.kpis.eficiencia_media_sst is not none %}{{ "%.1f"|format(dados.kpis.eficiencia_media_sst) }}%{% else %}--{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="station-card flex flex-col">
+            <div class="station-card-header">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Conformidade Legal (P2)</h2>
+                    <p class="text-[11px] font-mono text-slate-500 mt-0.5">Distribuição no efluente tratado</p>
+                </div>
+            </div>
+            <div class="station-card-body relative flex-grow min-h-[240px] flex items-center justify-center">
+                <canvas id="chartConformidade"></canvas>
+            </div>
+        </div>
+
+        <div class="station-card lg:col-span-2 flex flex-col">
+            <div class="station-card-header">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Eficiência de Remoção da ETE (%)</h2>
+                    <p class="text-[11px] font-mono text-slate-500 mt-0.5">Evolução histórica de DBO5,20, DQO e SST entre P1 e P2</p>
+                </div>
+                <span class="file-spec-tag">Meta DBO &gt;= 60%</span>
+            </div>
+            <div class="station-card-body relative flex-grow min-h-[240px]">
+                <canvas id="chartEficiencia"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="station-card flex flex-col">
+            <div class="station-card-header">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Rio Piracicaba: Montante (P3) vs Jusante (P4)</h2>
+                    <p id="subtitulo-rio-chart" class="text-[11px] font-mono text-slate-500 mt-0.5">
+                        Campanha {{ dados.graficos.rio_comparativo.campanha_mes }} ({{ dados.graficos.rio_comparativo.codigo_laudo }})
+                    </p>
+                </div>
+                <span class="file-spec-tag">CONAMA 357 Cl. 2</span>
+            </div>
+            <div class="station-card-body relative flex-grow min-h-[260px]">
+                <canvas id="chartRio"></canvas>
+            </div>
+        </div>
+
+        <div class="station-card flex flex-col">
+            <div class="station-card-header">
+                <div>
+                    <h2 id="titulo-param-chart" class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">
+                        Série Histórica em P2: {{ dados.graficos.evolucao_parametro_p2.parametro }}
+                    </h2>
+                    <p id="subtitulo-param-chart" class="text-[11px] font-mono text-slate-500 mt-0.5">
+                        Norma aplicada: {{ dados.graficos.evolucao_parametro_p2.norma_restritiva }}
+                    </p>
+                </div>
+                <span id="badge-limite-param" class="file-spec-tag">
+                    {% if dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
+                        Teto &lt;= {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
+                    {% else %}
+                        Monitoramento
+                    {% endif %}
+                </span>
+            </div>
+            <div class="station-card-body relative flex-grow min-h-[260px]">
+                <canvas id="chartParametro"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Ranking de Não Conformidades por Parâmetro (P2)</h2>
+                <p class="text-[11px] font-mono text-slate-500 mt-0.5">Parâmetros com maior incidência de violação legal no período selecionado</p>
+            </div>
+            <span id="badge-count-ranking" class="stamp-badge {% if dados.graficos.nao_conformidades_por_parametro.parametros %}stamp-violacao{% else %}stamp-conforme{% endif %}">
+                {% if dados.graficos.nao_conformidades_por_parametro.parametros %}
+                    {{ dados.graficos.nao_conformidades_por_parametro.parametros|length }} parâmetro(s)
+                {% else %}
+                    Sem violações
+                {% endif %}
+            </span>
+        </div>
+        <div class="station-card-body">
+            <div id="ranking-vazio" class="{% if dados.graficos.nao_conformidades_por_parametro.parametros %}hidden{% endif %} py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">
+                Nenhuma violação legal registrada em P2 para compor o ranking no período selecionado.
+            </div>
+            <div id="ranking-chart-wrap" class="{% if not dados.graficos.nao_conformidades_por_parametro.parametros %}hidden{% endif %} relative h-64">
+                <canvas id="chartRankingViolacoes"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="station-card">
+            <div class="station-card-header">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Alertas de Não Conformidade (P2)</h2>
+                    <p class="text-[11px] font-mono text-slate-500 mt-0.5">Parâmetros fora dos padrões legais</p>
+                </div>
+                <span id="badge-count-alertas-p2" class="stamp-badge stamp-violacao">
+                    {{ dados.alertas_p2|length }} alerta(s)
+                </span>
+            </div>
+            <div id="lista-alertas-p2" class="station-card-body space-y-2.5 max-h-80 overflow-y-auto">
+                {% if dados.alertas_p2 %}
+                    {% for a in dados.alertas_p2 %}
+                    <div class="bg-rose-50/40 border border-rose-200 rounded-lg p-3 text-xs">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center flex-wrap gap-1.5">
+                                <span class="font-mono font-bold text-rose-800">{{ a.campanha_mes }}</span>
+                                <span class="text-slate-300">|</span>
+                                <strong class="text-slate-900">{{ a.parametro }}</strong>
+                                <span class="font-mono text-[11px] text-rose-700">({{ a.norma_violada }})</span>
+                            </div>
+                            <a href="{{ url_for('ver_relatorio', codigo_laudo=a.codigo_laudo) }}"
+                               class="text-[11px] font-mono text-[#971E84] hover:underline shrink-0">
+                                Abrir Parecer
+                            </a>
+                        </div>
+                        <p class="mt-1 text-[11px] font-mono text-slate-700 leading-relaxed">{{ a.alerta }}</p>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">
+                        Nenhuma não conformidade detectada em P2 no período selecionado.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="station-card">
+            <div class="station-card-header">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Investigação de Impacto no Rio</h2>
+                    <p class="text-[11px] font-mono text-slate-500 mt-0.5">Alterações relevantes entre Montante (P3) e Jusante (P4)</p>
+                </div>
+                <span id="badge-count-rio" class="stamp-badge stamp-atencao">
+                    {{ dados.investigacoes_rio|length }} ocorrência(s)
+                </span>
+            </div>
+            <div id="lista-investigacoes-rio" class="station-card-body space-y-2.5 max-h-80 overflow-y-auto">
+                {% if dados.investigacoes_rio %}
+                    {% for r in dados.investigacoes_rio %}
+                    <div class="rounded-lg p-3 text-xs border {% if r.status_rio == 'Alerta de Impacto' %}bg-rose-50/40 border-rose-200{% else %}bg-amber-50/40 border-amber-200{% endif %}">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center flex-wrap gap-1.5">
+                                <span class="font-mono font-bold text-slate-900">{{ r.campanha_mes }}</span>
+                                <span class="text-slate-300">|</span>
+                                <strong class="text-slate-900">{{ r.parametro }}</strong>
+                                <span class="stamp-badge {% if r.status_rio == 'Alerta de Impacto' %}stamp-violacao{% else %}stamp-atencao{% endif %}">
+                                    {{ r.status_rio }}
+                                </span>
+                            </div>
+                            <a href="{{ url_for('ver_relatorio', codigo_laudo=r.codigo_laudo) }}"
+                               class="text-[11px] font-mono text-[#971E84] hover:underline shrink-0">
+                                Abrir Parecer
+                            </a>
+                        </div>
+                        <p class="mt-1 text-[11px] font-mono text-slate-700 leading-relaxed">{{ r.alerta_impacto }}</p>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">
+                        Nenhum impacto ou desvio significativo no Rio Piracicaba no período selecionado.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Histórico Consolidado por Campanha</h2>
+                <p class="text-[11px] font-mono text-slate-500 mt-0.5">Resumo de conformidade, eficiência DBO e ocorrências no rio</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <input type="search"
+                       data-table-filter="tabela-dashboard-campanhas"
+                       placeholder="Filtrar campanha..."
+                       class="table-search-input">
+                <span id="badge-count-campanhas" class="stamp-badge stamp-info">{{ dados.resumo_campanhas|length }} campanhas</span>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table id="tabela-dashboard-campanhas" class="lab-table font-mono">
+                <thead>
+                    <tr>
+                        <th class="text-left">Campanha</th>
+                        <th class="text-left">Código</th>
+                        <th class="text-left">Data Coleta</th>
+                        <th class="text-left">Eficiência DBO</th>
+                        <th class="text-left">P2 Conformes</th>
+                        <th class="text-left">Violações P2</th>
+                        <th class="text-left">Alertas Rio</th>
+                        <th class="text-right">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in dados.resumo_campanhas %}
+                    <tr data-searchable="true" data-codigo-laudo="{{ c.codigo_laudo }}">
+                        <td><span class="stamp-badge stamp-info">{{ c.campanha_mes }}</span></td>
+                        <td class="font-bold text-[#971E84]">{{ c.codigo_laudo }}</td>
+                        <td class="text-slate-600">{{ c.data_coleta }}</td>
+                        <td class="font-bold {% if c.eficiencia_dbo is not none and c.eficiencia_dbo < 60 %}text-rose-600{% else %}text-[#971E84]{% endif %}">
+                            {% if c.eficiencia_dbo is not none %}{{ "%.1f"|format(c.eficiencia_dbo) }}%{% else %}--{% endif %}
+                        </td>
+                        <td class="text-emerald-700 font-semibold">{{ c.conformes }}</td>
+                        <td>
+                            {% if c.nao_conformes > 0 %}
+                                <span class="stamp-badge stamp-violacao">{{ c.nao_conformes }}</span>
+                            {% else %}
+                                <span class="text-emerald-700">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if c.alertas_rio > 0 %}
+                                <span class="stamp-badge stamp-violacao">{{ c.alertas_rio }} impacto</span>
+                            {% elif c.atencao_rio > 0 %}
+                                <span class="stamp-badge stamp-atencao">{{ c.atencao_rio }} atenção</span>
+                            {% else %}
+                                <span class="stamp-badge stamp-conforme">Normal</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right space-x-2 whitespace-nowrap">
+                            <a href="{{ url_for('ver_relatorio', codigo_laudo=c.codigo_laudo) }}"
+                               class="text-[#971E84] hover:text-[#7e186e] font-semibold text-xs transition-colors">
+                                Abrir Parecer
+                            </a>
+                            <span class="text-slate-300">|</span>
+                            <a href="{{ url_for('baixar_relatorio_pdf', codigo_laudo=c.codigo_laudo) }}"
+                               class="text-slate-600 hover:text-slate-900 text-xs transition-colors">
+                                Download PDF
+                            </a>
+                            <span class="text-slate-300">|</span>
+                            <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
+                                  onsubmit="return confirm('Deseja excluir a campanha {{ c.codigo_laudo }}?');">
+                                <input type="hidden" name="origem" value="dashboard">
+                                <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">
+                                    Excluir
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="dashboard-config"
+         class="hidden"
+         data-dados="{{ dados | tojson | forceescape }}"
+         data-api-url="{{ url_for('api_dashboard') }}"
+         data-relatorio-url="{{ url_for('ver_relatorio', codigo_laudo='__COD__') }}">
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+        const configEl = document.getElementById('dashboard-config');
+        const dadosIniciais = JSON.parse(configEl.dataset.dados);
+        const urlApiDashboard = configEl.dataset.apiUrl;
+        const urlRelatorioBase = configEl.dataset.relatorioUrl;
+
+        let chartConformidade = null;
+        let chartEficiencia = null;
+        let chartRio = null;
+        let chartParametro = null;
+        let chartRanking = null;
+
+        function escaparHtml(texto) {
+            const div = document.createElement('div');
+            div.textContent = texto || '';
+            return div.innerHTML;
+        }
+
+        /**
+         * Atualiza os cartoes de KPI e os paineis de alertas (P2 e Rio Piracicaba)
+         * com base nos dados filtrados retornados pela API.
+         */
+        function atualizarKpisEListas(dados) {
+            const k = dados.kpis;
+            document.getElementById('kpi-taxa-conformidade').textContent = `${k.taxa_conformidade_pct.toFixed(1)}%`;
+            document.getElementById('kpi-barra-conformidade').style.width = `${k.taxa_conformidade_pct}%`;
+            document.getElementById('kpi-sub-conformidade').textContent = `${k.total_conformes_p2} de ${k.total_avaliadas_p2} parâmetros em P2`;
+
+            const elNconf = document.getElementById('kpi-nao-conformes');
+            elNconf.textContent = k.total_nao_conformes_p2;
+            elNconf.className = `telemetry-value ${k.total_nao_conformes_p2 > 0 ? 'text-rose-600' : 'text-emerald-600'}`;
+
+            const elRio = document.getElementById('kpi-alertas-rio');
+            elRio.textContent = k.total_alertas_rio;
+            elRio.className = `telemetry-value ${k.total_alertas_rio > 0 ? 'text-rose-600' : (k.total_atencao_rio > 0 ? 'text-amber-600' : 'text-emerald-600')}`;
+            document.getElementById('kpi-sub-rio').textContent = `${k.total_atencao_rio} ponto(s) em atenção (>= 20%)`;
+
+            document.getElementById('kpi-eficiencia-dbo').textContent = k.eficiencia_media_dbo !== null ? `${k.eficiencia_media_dbo.toFixed(1)}%` : '--';
+            const dqoTxt = k.eficiencia_media_dqo !== null ? `${k.eficiencia_media_dqo.toFixed(1)}%` : '--';
+            const sstTxt = k.eficiencia_media_sst !== null ? `${k.eficiencia_media_sst.toFixed(1)}%` : '--';
+            document.getElementById('kpi-sub-eficiencia').textContent = `DQO: ${dqoTxt} | SST: ${sstTxt}`;
+
+            document.getElementById('badge-count-alertas-p2').textContent = `${dados.alertas_p2.length} alerta(s)`;
+            const boxAlertas = document.getElementById('lista-alertas-p2');
+            if (dados.alertas_p2.length === 0) {
+                boxAlertas.innerHTML = `<div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">Nenhuma não conformidade detectada em P2 no período selecionado.</div>`;
+            } else {
+                boxAlertas.innerHTML = dados.alertas_p2.map(a => {
+                    const link = urlRelatorioBase.replace('__COD__', encodeURIComponent(a.codigo_laudo));
+                    return `
+                    <div class="bg-rose-50/40 border border-rose-200 rounded-lg p-3 text-xs">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center flex-wrap gap-1.5">
+                                <span class="font-mono font-bold text-rose-800">${escaparHtml(a.campanha_mes)}</span>
+                                <span class="text-slate-300">|</span>
+                                <strong class="text-slate-900">${escaparHtml(a.parametro)}</strong>
+                                <span class="font-mono text-[11px] text-rose-700">(${escaparHtml(a.norma_violada)})</span>
+                            </div>
+                            <a href="${link}" class="text-[11px] font-mono text-[#971E84] hover:underline shrink-0">Abrir Parecer</a>
+                        </div>
+                        <p class="mt-1 text-[11px] font-mono text-slate-700 leading-relaxed">${escaparHtml(a.alerta)}</p>
+                    </div>`;
+                }).join('');
+            }
+
+            document.getElementById('badge-count-rio').textContent = `${dados.investigacoes_rio.length} ocorrência(s)`;
+            const boxRio = document.getElementById('lista-investigacoes-rio');
+            if (dados.investigacoes_rio.length === 0) {
+                boxRio.innerHTML = `<div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">Nenhum impacto ou desvio significativo no Rio Piracicaba no período selecionado.</div>`;
+            } else {
+                boxRio.innerHTML = dados.investigacoes_rio.map(r => {
+                    const link = urlRelatorioBase.replace('__COD__', encodeURIComponent(r.codigo_laudo));
+                    const isImpacto = r.status_rio === 'Alerta de Impacto';
+                    return `
+                    <div class="rounded-lg p-3 text-xs border ${isImpacto ? 'bg-rose-50/40 border-rose-200' : 'bg-amber-50/40 border-amber-200'}">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center flex-wrap gap-1.5">
+                                <span class="font-mono font-bold text-slate-900">${escaparHtml(r.campanha_mes)}</span>
+                                <span class="text-slate-300">|</span>
+                                <strong class="text-slate-900">${escaparHtml(r.parametro)}</strong>
+                                <span class="stamp-badge ${isImpacto ? 'stamp-violacao' : 'stamp-atencao'}">${escaparHtml(r.status_rio)}</span>
+                            </div>
+                            <a href="${link}" class="text-[11px] font-mono text-[#971E84] hover:underline shrink-0">Abrir Parecer</a>
+                        </div>
+                        <p class="mt-1 text-[11px] font-mono text-slate-700 leading-relaxed">${escaparHtml(r.alerta_impacto)}</p>
+                    </div>`;
+                }).join('');
+            }
+
+            const campanhaSel = dados.filtros.campanha_selecionada;
+            const tabelaCampanhas = document.getElementById('tabela-dashboard-campanhas');
+            const inputBusca = document.querySelector('[data-table-filter="tabela-dashboard-campanhas"]');
+            const termoBusca = inputBusca ? inputBusca.value.trim().toLowerCase() : '';
+            let visiveisCampanha = 0;
+
+            if (tabelaCampanhas) {
+                tabelaCampanhas.querySelectorAll('tbody tr[data-codigo-laudo]').forEach(tr => {
+                    const correspondeCampanha = campanhaSel === 'todas' || tr.dataset.codigoLaudo === campanhaSel;
+                    tr.dataset.campanhaHidden = correspondeCampanha ? 'false' : 'true';
+                    if (correspondeCampanha) visiveisCampanha += 1;
+                    const correspondeBusca = !termoBusca || (tr.textContent || '').toLowerCase().includes(termoBusca);
+                    tr.style.display = (correspondeCampanha && correspondeBusca) ? '' : 'none';
+                });
+            }
+
+            const badgeCampanhas = document.getElementById('badge-count-campanhas');
+            if (badgeCampanhas) {
+                badgeCampanhas.textContent = `${visiveisCampanha} ${visiveisCampanha === 1 ? 'campanha' : 'campanhas'}`;
+            }
+        }
+
+        /**
+         * Cria ou recria os quatro graficos do dashboard em Chart.js
+         * (conformidade em P2, eficiencia da ETE, comparativo do rio e serie historica).
+         */
+        function renderizarGraficos(dados) {
+            const g = dados.graficos;
+            if (!g || !g.conformidade_rosca) return;
+
+            const fonteMono = "'JetBrains Mono', monospace";
+
+            if (chartConformidade) chartConformidade.destroy();
+            chartConformidade = new Chart(document.getElementById('chartConformidade'), {
+                type: 'doughnut',
+                data: {
+                    labels: g.conformidade_rosca.labels,
+                    datasets: [{
+                        data: g.conformidade_rosca.valores,
+                        backgroundColor: ['#047857', '#b91c1c', '#94a3b8'],
+                        borderColor: '#ffffff',
+                        borderWidth: 2,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '66%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: { family: fonteMono, size: 11 },
+                                padding: 14,
+                                usePointStyle: true
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (chartEficiencia) chartEficiencia.destroy();
+            const mesesEf = g.eficiencia_temporal.meses;
+            const linhaMeta = mesesEf.map(() => g.eficiencia_temporal.meta_dbo);
+
+            chartEficiencia = new Chart(document.getElementById('chartEficiencia'), {
+                type: 'line',
+                data: {
+                    labels: mesesEf,
+                    datasets: [
+                        {
+                            label: 'DBO5,20 (%)',
+                            data: g.eficiencia_temporal.series['DBO5,20'],
+                            borderColor: '#971E84',
+                            backgroundColor: 'rgba(151, 30, 132, 0.12)',
+                            borderWidth: 2.5,
+                            tension: 0.25,
+                            fill: true,
+                            pointRadius: 4
+                        },
+                        {
+                            label: 'DQO (%)',
+                            data: g.eficiencia_temporal.series['DQO'],
+                            borderColor: '#0ea5e9',
+                            backgroundColor: 'rgba(14, 165, 233, 0.08)',
+                            borderWidth: 2,
+                            tension: 0.25,
+                            pointRadius: 3
+                        },
+                        {
+                            label: 'SST (%)',
+                            data: g.eficiencia_temporal.series['Sólidos Suspensos Totais'],
+                            borderColor: '#047857',
+                            backgroundColor: 'rgba(4, 120, 87, 0.08)',
+                            borderWidth: 2,
+                            tension: 0.25,
+                            pointRadius: 3
+                        },
+                        {
+                            label: 'Meta Legal DBO (60%)',
+                            data: linhaMeta,
+                            borderColor: '#b91c1c',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100,
+                            ticks: {
+                                font: { family: fonteMono, size: 11 },
+                                callback: val => val + '%'
+                            },
+                            grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                        },
+                        x: {
+                            ticks: { font: { family: fonteMono, size: 11 } },
+                            grid: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: { family: fonteMono, size: 11 }, usePointStyle: true }
+                        }
+                    }
+                }
+            });
+
+            const rio = g.rio_comparativo;
+            document.getElementById('subtitulo-rio-chart').textContent = `Campanha ${rio.campanha_mes} (${rio.codigo_laudo})`;
+            if (chartRio) chartRio.destroy();
+            chartRio = new Chart(document.getElementById('chartRio'), {
+                type: 'bar',
+                data: {
+                    labels: rio.parametros,
+                    datasets: [
+                        {
+                            label: 'Montante (P3)',
+                            data: rio.montante_p3,
+                            backgroundColor: 'rgba(100, 116, 139, 0.65)',
+                            borderRadius: 4
+                        },
+                        {
+                            label: 'Jusante (P4)',
+                            data: rio.jusante_p4,
+                            backgroundColor: rio.status.map(st => st === 'Alerta de Impacto' ? '#b91c1c' : (st === 'Atenção' ? '#b45309' : '#971E84')),
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { font: { family: fonteMono, size: 11 } },
+                            grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                        },
+                        x: {
+                            ticks: { font: { family: fonteMono, size: 10 } },
+                            grid: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: { family: fonteMono, size: 11 }, usePointStyle: true }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: (ctx) => {
+                                    const idx = ctx.dataIndex;
+                                    const un = rio.unidades[idx] || '';
+                                    const st = rio.status[idx] || 'Normal';
+                                    const lMax = rio.limites_max[idx];
+                                    const lMin = rio.limites_min[idx];
+                                    let limTxt = '';
+                                    if (lMin !== null && lMax !== null) {
+                                        limTxt = ` | Classe 2: ${lMin} a ${lMax}`;
+                                    } else if (lMax !== null) {
+                                        limTxt = ` | Classe 2 <= ${lMax}`;
+                                    } else if (lMin !== null) {
+                                        limTxt = ` | Classe 2 >= ${lMin}`;
+                                    }
+                                    return `Unidade: ${un} | Status: ${st}${limTxt}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const ep = g.evolucao_parametro_p2;
+            document.getElementById('titulo-param-chart').textContent = `Série Histórica em P2: ${ep.parametro}`;
+            document.getElementById('subtitulo-param-chart').textContent = `Norma aplicada: ${ep.norma_restritiva}`;
+            const badgeLim = document.getElementById('badge-limite-param');
+            if (ep.limite_max_restritivo !== null && ep.limite_min_restritivo !== null) {
+                badgeLim.textContent = `Faixa ${ep.limite_min_restritivo} a ${ep.limite_max_restritivo} ${ep.unidade}`;
+            } else if (ep.limite_max_restritivo !== null) {
+                badgeLim.textContent = `Teto <= ${ep.limite_max_restritivo} ${ep.unidade}`;
+            } else {
+                badgeLim.textContent = 'Monitoramento';
+            }
+
+            const datasetsParam = [
+                {
+                    label: `Tratado P2 (${ep.unidade})`,
+                    data: ep.valores_p2,
+                    borderColor: '#971E84',
+                    backgroundColor: 'rgba(151, 30, 132, 0.12)',
+                    borderWidth: 2.5,
+                    tension: 0.25,
+                    fill: true,
+                    pointRadius: 4
+                }
+            ];
+
+            if (ep.limite_max_restritivo !== null) {
+                datasetsParam.push({
+                    label: `Limite Máximo (${ep.limite_max_restritivo} ${ep.unidade})`,
+                    data: ep.meses.map(() => ep.limite_max_restritivo),
+                    borderColor: '#b91c1c',
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    fill: false
+                });
+            }
+
+            if (ep.limite_min_restritivo !== null) {
+                datasetsParam.push({
+                    label: `Limite Mínimo (${ep.limite_min_restritivo} ${ep.unidade})`,
+                    data: ep.meses.map(() => ep.limite_min_restritivo),
+                    borderColor: '#b45309',
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    fill: false
+                });
+            }
+
+            if (chartParametro) chartParametro.destroy();
+            chartParametro = new Chart(document.getElementById('chartParametro'), {
+                type: 'line',
+                data: {
+                    labels: ep.meses,
+                    datasets: datasetsParam
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { font: { family: fonteMono, size: 11 } },
+                            grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                        },
+                        x: {
+                            ticks: { font: { family: fonteMono, size: 11 } },
+                            grid: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: { family: fonteMono, size: 11 }, usePointStyle: true }
+                        }
+                    }
+                }
+            });
+
+            const rank = g.nao_conformidades_por_parametro || { parametros: [], contagens: [] };
+            const rankVazio = document.getElementById('ranking-vazio');
+            const rankWrap = document.getElementById('ranking-chart-wrap');
+            const badgeRank = document.getElementById('badge-count-ranking');
+
+            if (chartRanking) {
+                chartRanking.destroy();
+                chartRanking = null;
+            }
+
+            if (rank.parametros.length === 0) {
+                if (rankVazio) rankVazio.classList.remove('hidden');
+                if (rankWrap) rankWrap.classList.add('hidden');
+                if (badgeRank) {
+                    badgeRank.textContent = 'Sem violações';
+                    badgeRank.className = 'stamp-badge stamp-conforme';
+                }
+            } else {
+                if (rankVazio) rankVazio.classList.add('hidden');
+                if (rankWrap) rankWrap.classList.remove('hidden');
+                if (badgeRank) {
+                    badgeRank.textContent = `${rank.parametros.length} parâmetro(s)`;
+                    badgeRank.className = 'stamp-badge stamp-violacao';
+                }
+                chartRanking = new Chart(document.getElementById('chartRankingViolacoes'), {
+                    type: 'bar',
+                    data: {
+                        labels: rank.parametros,
+                        datasets: [{
+                            label: 'Ocorrências de Não Conformidade',
+                            data: rank.contagens,
+                            backgroundColor: 'rgba(185, 28, 28, 0.82)',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                ticks: { stepSize: 1, precision: 0, font: { family: fonteMono, size: 11 } },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            },
+                            y: {
+                                ticks: { font: { family: fonteMono, size: 11 } },
+                                grid: { display: false }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+            }
+        }
+
+        /**
+         * Consulta a rota JSON do dashboard com os filtros selecionados
+         * e atualiza indicadores, listas e graficos sem recarregar a pagina.
+         */
+        async function recarregarDashboard() {
+            const campanha = document.getElementById('filtro-campanha').value;
+            const parametro = document.getElementById('filtro-parametro').value;
+            const params = new URLSearchParams({ campanha, parametro });
+            try {
+                const resp = await fetch(`${urlApiDashboard}?${params.toString()}`);
+                if (!resp.ok) return;
+                const novosDados = await resp.json();
+                atualizarKpisEListas(novosDados);
+                renderizarGraficos(novosDados);
+            } catch (err) {
+                console.error('Erro ao atualizar dashboard:', err);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const barraConf = document.getElementById('kpi-barra-conformidade');
+            if (barraConf && barraConf.dataset.width) {
+                barraConf.style.width = `${barraConf.dataset.width}%`;
+            }
+            renderizarGraficos(dadosIniciais);
+            document.getElementById('filtro-campanha').addEventListener('change', recarregarDashboard);
+            document.getElementById('filtro-parametro').addEventListener('change', recarregarDashboard);
+        });
+    </script>
+    {% endif %}
+
+</div>
+{% endblock %}

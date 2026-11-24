@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from app import db
 
@@ -248,7 +248,7 @@ class Laudo(db.Model):
     laboratorio = db.Column(db.String(150), nullable=True)
     arquivo_origem = db.Column(db.String(255), nullable=True)
     observacoes = db.Column(db.Text, nullable=True)
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Se o laudo for apagado, remove em cascata suas medicoes e eficiencias
     medicoes = db.relationship('ResultadoAnalise', backref='laudo', cascade='all, delete-orphan', lazy=True)
@@ -280,7 +280,7 @@ class ResultadoAnalise(db.Model):
     norma_violada = db.Column(db.String(150), nullable=True)
     alerta = db.Column(db.Text, nullable=True)
 
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     limite_ref = db.relationship('LimiteLegal', backref='medicoes', lazy=True)
 
     def __repr__(self):
@@ -305,7 +305,7 @@ class EficienciaETE(db.Model):
     avaliacao = db.Column(db.String(50), nullable=False)
     atingiu_meta = db.Column(db.Boolean, nullable=True)
 
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<Eficiencia {self.parametro}: {self.eficiencia_percentual:.1f}% ({self.avaliacao})>"

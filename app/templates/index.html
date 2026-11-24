@@ -29,7 +29,7 @@
         </div>
 
         <div class="station-card-body">
-            <form action="{{ url_for('importar') }}" method="POST" enctype="multipart/form-data">
+            <form action="{{ url_for('importar') }}" method="POST" enctype="multipart/form-data" data-upload-form data-loading-text="Processando planilha...">
                 
                 <div id="dropzone-excel" class="industrial-dropzone">
                     <input type="file" name="arquivo" id="arquivo-excel" accept=".xlsx, .xls" required
@@ -81,7 +81,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="20 6 9 17 4 12"/>
                         </svg>
-                        <span>Processar Planilha</span>
+                        <span data-submit-label>Processar Planilha</span>
                     </button>
                 </div>
             </form>
@@ -124,19 +124,32 @@
     </div>
 
     {% if campanhas %}
-    <div class="station-card max-w-5xl">
+    <div id="historico" class="station-card max-w-5xl">
         <div class="station-card-header">
             <div>
                 <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Histórico de Laudos no Banco</h2>
                 <p class="text-[11px] text-slate-500 font-mono mt-0.5">Campanhas mensais persistidas no SQLite local</p>
             </div>
-            <span class="stamp-badge stamp-info">
-                {{ campanhas|length }} campanhas cadastradas
-            </span>
+            <div class="flex flex-wrap items-center gap-2">
+                <input type="search"
+                       data-table-filter="tabela-historico-excel"
+                       placeholder="Filtrar campanha..."
+                       class="table-search-input">
+                <span class="stamp-badge stamp-info">
+                    {{ campanhas|length }} campanhas cadastradas
+                </span>
+                <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
+                      onsubmit="return confirm('Deseja excluir todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros cadastrados serão mantidos.');">
+                    <input type="hidden" name="origem" value="index">
+                    <button type="submit" class="btn-industrial-danger py-1 px-2.5 text-[11px]">
+                        Limpar histórico
+                    </button>
+                </form>
+            </div>
         </div>
 
         <div class="overflow-x-auto">
-            <table class="lab-table">
+            <table id="tabela-historico-excel" class="lab-table">
                 <thead>
                     <tr>
                         <th class="text-left">Código</th>
@@ -149,7 +162,7 @@
                 </thead>
                 <tbody class="font-mono">
                     {% for c in campanhas %}
-                    <tr>
+                    <tr data-searchable="true">
                         <td class="font-bold text-[#971E84]">{{ c.codigo_laudo }}</td>
                         <td>
                             <span class="stamp-badge stamp-info">{{ c.campanha_mes }}</span>
@@ -157,7 +170,7 @@
                         <td class="text-slate-600">{{ c.data_coleta.strftime('%d/%m/%Y') }}</td>
                         <td class="text-slate-700 font-sans font-medium">{{ c.laboratorio or 'Laboratório Acreditado' }}</td>
                         <td class="text-slate-500">{{ c.medicoes|length }} registros</td>
-                        <td class="text-right space-x-2">
+                        <td class="text-right space-x-2 whitespace-nowrap">
                             <a href="{{ url_for('ver_relatorio', codigo_laudo=c.codigo_laudo) }}"
                                class="text-[#971E84] hover:text-[#7e186e] font-semibold text-xs transition-colors">
                                 Abrir Parecer
@@ -167,6 +180,14 @@
                                class="text-slate-600 hover:text-slate-900 text-xs transition-colors">
                                 Download PDF
                             </a>
+                            <span class="text-slate-300">|</span>
+                            <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
+                                  onsubmit="return confirm('Deseja excluir o laudo {{ c.codigo_laudo }}?');">
+                                <input type="hidden" name="origem" value="index">
+                                <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">
+                                    Excluir
+                                </button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}

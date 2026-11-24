@@ -14,7 +14,7 @@
                     <span class="text-slate-500">Unidade Americana/SP</span>
                 </div>
                 <h1 class="text-2xl font-bold text-slate-900 tracking-tight">
-                    Avaliação de Conformidade de Efluentes & Rio Piracicaba
+                    Avaliação de Conformidade de Efluentes &amp; Rio Piracicaba
                 </h1>
                 <p class="text-xs text-slate-500 font-mono mt-1">
                     Confronto Legal: CONAMA 430/2011 • Decreto Estadual SP 8.468/1976 • CONAMA 357/2005 Classe 2
@@ -32,9 +32,17 @@
                         </svg>
                         <span>Baixar Laudo PDF</span>
                     </a>
+                    <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=laudo.codigo_laudo) }}" method="POST" class="inline"
+                          onsubmit="return confirm('Deseja excluir o laudo {{ laudo.codigo_laudo }} do banco de dados?');">
+                        <input type="hidden" name="origem" value="dashboard">
+                        <button type="submit" class="btn-industrial-danger">
+                            Excluir Laudo
+                        </button>
+                    </form>
                 {% elif resultado and resultado.campanhas_processadas %}
                     {% for mes in resultado.campanhas_processadas %}
-                        <a href="{{ url_for('baixar_relatorio_pdf', codigo_laudo='CAMP-' + mes) }}"
+                        {% set cod_mes = resultado.relatorios_por_mes[mes].codigo_laudo if resultado.relatorios_por_mes and mes in resultado.relatorios_por_mes else ('CAMP-' + mes) %}
+                        <a href="{{ url_for('baixar_relatorio_pdf', codigo_laudo=cod_mes) }}"
                            class="btn-industrial-primary">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -45,6 +53,10 @@
                         </a>
                     {% endfor %}
                 {% endif %}
+
+                <a href="{{ url_for('dashboard') }}" class="btn-industrial-secondary">
+                    <span>Dashboard</span>
+                </a>
 
                 <a href="{{ url_for('index') }}" class="btn-industrial-secondary">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -99,7 +111,7 @@
             {% for a in resultado.alertas %}
             <div class="bg-rose-50/40 border border-rose-200 rounded-lg p-3.5 text-xs flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div>
-                    <div class="flex items-center space-x-2">
+                    <div class="flex items-center flex-wrap gap-2">
                         <span class="font-mono font-bold text-rose-800">Campanha {{ a.mes }}</span>
                         <span class="text-slate-300">|</span>
                         <span class="font-bold text-slate-900">{{ a.parametro }}</span>
@@ -121,7 +133,7 @@
         <div class="station-card-header">
             <div>
                 <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Eficiência Operacional da ETE (P1 Bruto vs P2 Tratado)</h2>
-                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Fórmula: ((P1 - P2) / P1) * 100 • Meta legal DBO >= 60%</p>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Fórmula: ((P1 - P2) / P1) * 100 • Meta legal DBO &gt;= 60%</p>
             </div>
             <span class="stamp-badge stamp-info">Balanço de Carga</span>
         </div>
@@ -146,10 +158,10 @@
                         <td class="text-slate-600">{{ ef.saida_p2 }} {{ ef.unidade }}</td>
                         <td class="text-sm font-bold text-[#971E84]">{{ ef.eficiencia_pct }}%</td>
                         <td class="text-right">
-                            {% if 'Conforme' in ef.avaliacao %}
-                                <span class="stamp-badge stamp-conforme">{{ ef.avaliacao }}</span>
-                            {% elif 'Não Conforme' in ef.avaliacao %}
+                            {% if 'Não Conforme' in ef.avaliacao %}
                                 <span class="stamp-badge stamp-violacao">{{ ef.avaliacao }}</span>
+                            {% elif 'Conforme' in ef.avaliacao %}
+                                <span class="stamp-badge stamp-conforme">{{ ef.avaliacao }}</span>
                             {% else %}
                                 <span class="stamp-badge stamp-info">{{ ef.avaliacao }}</span>
                             {% endif %}
@@ -169,10 +181,13 @@
                 <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Monitoramento do Rio Piracicaba (Montante P3 vs Jusante P4)</h2>
                 <p class="text-[11px] text-slate-500 font-mono mt-0.5">Padrões de Qualidade de Água Doce Classe 2 (CONAMA 357/2005)</p>
             </div>
-            <span class="stamp-badge stamp-info">Corpo Receptor</span>
+            <input type="search"
+                   data-table-filter="tabela-rio-resultado"
+                   placeholder="Filtrar parâmetro..."
+                   class="table-search-input">
         </div>
         <div class="overflow-x-auto">
-            <table class="lab-table font-mono">
+            <table id="tabela-rio-resultado" class="lab-table font-mono">
                 <thead>
                     <tr>
                         <th class="text-left">Mês</th>
@@ -186,12 +201,12 @@
                 </thead>
                 <tbody>
                     {% for imp in resultado.impactos_rio %}
-                    <tr>
+                    <tr data-searchable="true">
                         <td class="font-bold text-slate-900">{{ imp.mes }}</td>
                         <td class="font-sans font-semibold text-slate-800">{{ imp.parametro }}</td>
                         <td class="text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
                         <td class="text-slate-600">{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
-                        <td class="font-semibold {% if imp.diferenca > 0 and imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
+                        <td class="font-semibold {% if imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
                             {{ '%+0.2f' % imp.diferenca }} {{ imp.unidade }}
                             <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
                         </td>
@@ -207,7 +222,7 @@
                         </td>
                     </tr>
                     {% if imp.alerta_impacto %}
-                    <tr class="bg-amber-50/30">
+                    <tr data-detail-row="true" class="bg-amber-50/30">
                         <td colspan="7" class="px-5 py-2.5 text-[11px] font-mono text-amber-900">
                             <strong>Investigação sugerida:</strong> {{ imp.alerta_impacto }}
                         </td>
@@ -221,16 +236,43 @@
     {% endif %}
 
     {% elif laudo %}
+    {% set total_rio_alerta = impactos_rio | selectattr('status_rio', 'ne', 'Normal') | list | length %}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="telemetry-card">
+            <span class="telemetry-label">Medições em P2</span>
+            <div class="telemetry-value">{{ medicoes_p2|length }}</div>
+            <div class="telemetry-subtext">Campanha {{ laudo.campanha_mes }}</div>
+        </div>
+
+        <div class="telemetry-card {% if alertas %}border-rose-300 bg-rose-50/20{% endif %}">
+            <span class="telemetry-label">Não Conformidades</span>
+            <div class="telemetry-value {% if alertas %}text-rose-600{% else %}text-emerald-600{% endif %}">{{ alertas|length }}</div>
+            <div class="telemetry-subtext">no efluente tratado (P2)</div>
+        </div>
+
+        <div class="telemetry-card">
+            <span class="telemetry-label">Eficiências ETE</span>
+            <div class="telemetry-value text-[#971E84]">{{ eficiencias|length }}</div>
+            <div class="telemetry-subtext">cálculos DBO, DQO, SST</div>
+        </div>
+
+        <div class="telemetry-card {% if total_rio_alerta > 0 %}border-amber-300 bg-amber-50/20{% endif %}">
+            <span class="telemetry-label">Avisos no Rio</span>
+            <div class="telemetry-value {% if total_rio_alerta > 0 %}text-amber-600{% else %}text-emerald-600{% endif %}">{{ total_rio_alerta }}</div>
+            <div class="telemetry-subtext">Montante P3 vs Jusante P4</div>
+        </div>
+    </div>
+
     <div class="station-card">
         <div class="station-card-header">
             <div>
                 <span class="stamp-badge stamp-info">{{ laudo.codigo_laudo }}</span>
                 <h2 class="text-base font-bold text-slate-900 mt-1">Campanha de Monitoramento {{ laudo.campanha_mes }}</h2>
             </div>
-            <div class="text-[11px] font-mono text-slate-500 space-x-3">
+            <div class="text-[11px] font-mono text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
                 <span>Coleta: {{ laudo.data_coleta.strftime('%d/%m/%Y') }}</span>
                 <span>•</span>
-                <span>Laboratório: {{ laudo.laboratorio }}</span>
+                <span>Laboratório: {{ laudo.laboratorio or 'Laboratório Acreditado' }}</span>
             </div>
         </div>
 
@@ -244,39 +286,153 @@
             {% endfor %}
         </div>
         {% endif %}
+    </div>
 
-        <div class="p-5">
-            <h3 class="text-xs font-mono font-bold text-slate-700 uppercase mb-3">Medições no Efluente Tratado (P2)</h3>
-            <div class="overflow-x-auto border border-slate-200 rounded-lg">
-                <table class="lab-table font-mono">
-                    <thead>
-                        <tr>
-                            <th class="text-left">Parâmetro</th>
-                            <th class="text-left">Resultado Medido</th>
-                            <th class="text-left">Unidade</th>
-                            <th class="text-right">Status Legal</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for m in medicoes_p2 %}
-                        <tr>
-                            <td class="font-sans font-medium text-slate-900">{{ m.parametro }}</td>
-                            <td class="font-bold text-slate-900">{{ m.valor_texto or m.valor_medido }}</td>
-                            <td class="text-slate-500">{{ m.unidade }}</td>
-                            <td class="text-right">
-                                {% if m.status_conformidade == 'Conforme' %}
-                                    <span class="stamp-badge stamp-conforme">Conforme</span>
-                                {% elif m.status_conformidade == 'Não Conforme' %}
-                                    <span class="stamp-badge stamp-violacao">Não Conforme</span>
-                                {% else %}
-                                    <span class="stamp-badge stamp-info">Informativo</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    {% if eficiencias %}
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Eficiência de Tratamento da ETE (P1 Bruto vs P2 Tratado)</h2>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Fórmula: ((P1 - P2) / P1) * 100 • Meta legal DBO &gt;= 60%</p>
             </div>
+            <span class="stamp-badge stamp-info">Balanço de Carga</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="lab-table font-mono">
+                <thead>
+                    <tr>
+                        <th class="text-left">Parâmetro</th>
+                        <th class="text-left">Entrada (P1)</th>
+                        <th class="text-left">Saída (P2)</th>
+                        <th class="text-left">Eficiência Obtida</th>
+                        <th class="text-right">Avaliação Legal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ef in eficiencias %}
+                    <tr>
+                        <td class="font-sans font-semibold text-slate-800">{{ ef.parametro }}</td>
+                        <td class="text-slate-600">{{ "%.1f"|format(ef.entrada_p1) }} {{ ef.unidade }}</td>
+                        <td class="text-slate-600">{{ "%.1f"|format(ef.saida_p2) }} {{ ef.unidade }}</td>
+                        <td class="text-sm font-bold text-[#971E84]">{{ "%.1f"|format(ef.eficiencia_percentual) }}%</td>
+                        <td class="text-right">
+                            {% if 'Não Conforme' in ef.avaliacao %}
+                                <span class="stamp-badge stamp-violacao">{{ ef.avaliacao }}</span>
+                            {% elif 'Conforme' in ef.avaliacao %}
+                                <span class="stamp-badge stamp-conforme">{{ ef.avaliacao }}</span>
+                            {% else %}
+                                <span class="stamp-badge stamp-info">{{ ef.avaliacao }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if impactos_rio %}
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Monitoramento do Rio Piracicaba (Montante P3 vs Jusante P4)</h2>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Padrões de Qualidade de Água Doce Classe 2 (CONAMA 357/2005)</p>
+            </div>
+            <input type="search"
+                   data-table-filter="tabela-rio-salvo"
+                   placeholder="Filtrar parâmetro..."
+                   class="table-search-input">
+        </div>
+        <div class="overflow-x-auto">
+            <table id="tabela-rio-salvo" class="lab-table font-mono">
+                <thead>
+                    <tr>
+                        <th class="text-left">Parâmetro</th>
+                        <th class="text-left">Montante (P3)</th>
+                        <th class="text-left">Jusante (P4)</th>
+                        <th class="text-left">Variação (P4 - P3)</th>
+                        <th class="text-left">Teto Classe 2</th>
+                        <th class="text-right">Diagnóstico</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for imp in impactos_rio %}
+                    <tr data-searchable="true">
+                        <td class="font-sans font-semibold text-slate-800">{{ imp.parametro }}</td>
+                        <td class="text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
+                        <td class="text-slate-600">{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
+                        <td class="font-semibold {% if imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
+                            {{ '%+0.2f' % imp.diferenca }} {{ imp.unidade }}
+                            <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                        </td>
+                        <td class="text-slate-500">{{ imp.limite_classe2 }}</td>
+                        <td class="text-right">
+                            {% if imp.status_rio == 'Normal' %}
+                                <span class="stamp-badge stamp-conforme">Normal</span>
+                            {% elif imp.status_rio == 'Atenção' %}
+                                <span class="stamp-badge stamp-atencao">Atenção</span>
+                            {% else %}
+                                <span class="stamp-badge stamp-violacao">Alerta Impacto</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if imp.alerta_impacto %}
+                    <tr data-detail-row="true" class="bg-amber-50/30">
+                        <td colspan="6" class="px-5 py-2.5 text-[11px] font-mono text-amber-900">
+                            <strong>Investigação sugerida:</strong> {{ imp.alerta_impacto }}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h3 class="text-xs font-mono font-bold text-slate-900 uppercase tracking-wide">Medições no Efluente Tratado (P2)</h3>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Confronto automático com a norma mais restritiva</p>
+            </div>
+            <input type="search"
+                   data-table-filter="tabela-medicoes-p2"
+                   placeholder="Filtrar parâmetro..."
+                   class="table-search-input">
+        </div>
+        <div class="overflow-x-auto">
+            <table id="tabela-medicoes-p2" class="lab-table font-mono">
+                <thead>
+                    <tr>
+                        <th class="text-left">Parâmetro</th>
+                        <th class="text-left">Resultado Medido</th>
+                        <th class="text-left">Unidade</th>
+                        <th class="text-left">Norma Aplicável</th>
+                        <th class="text-right">Status Legal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in medicoes_p2 %}
+                    <tr data-searchable="true">
+                        <td class="font-sans font-medium text-slate-900">{{ m.parametro }}</td>
+                        <td class="font-bold text-slate-900">{{ m.valor_texto or m.valor_medido }}</td>
+                        <td class="text-slate-500">{{ m.unidade }}</td>
+                        <td class="text-slate-500 text-[11px]">{{ m.limite_ref.norma_mais_restritiva if m.limite_ref else 'Monitoramento' }}</td>
+                        <td class="text-right">
+                            {% if m.status_conformidade == 'Conforme' %}
+                                <span class="stamp-badge stamp-conforme">Conforme</span>
+                            {% elif m.status_conformidade == 'Não Conforme' %}
+                                <span class="stamp-badge stamp-violacao">Não Conforme</span>
+                            {% else %}
+                                <span class="stamp-badge stamp-info">Informativo</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}

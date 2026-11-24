@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, flash, send_file
+from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from app import app
 from app.models import Laudo
 from app.services import (
@@ -6,6 +6,9 @@ from app.services import (
     importar_relatorio_pdf,
     obter_contexto_relatorio,
     gerar_pdf_relatorio,
+    obter_dados_dashboard,
+    excluir_laudo,
+    limpar_todos_laudos,
 )
 
 
@@ -72,6 +75,24 @@ def importar_pdf():
         return redirect(url_for('importar_pdf'))
 
 
+@app.route('/dashboard')
+def dashboard():
+    """Exibe o Dashboard Ambiental consolidado com KPIs, graficos dinamicos e alertas."""
+    campanha = request.args.get('campanha', 'todas')
+    parametro = request.args.get('parametro', '')
+    dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
+    return render_template('dashboard.html', dados=dados)
+
+
+@app.route('/api/dashboard')
+def api_dashboard():
+    """Endpoint JSON para atualizacao interativa dos filtros e graficos no Dashboard."""
+    campanha = request.args.get('campanha', 'todas')
+    parametro = request.args.get('parametro', '')
+    dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
+    return jsonify(dados)
+
+
 @app.route('/relatorio/<codigo_laudo>')
 def ver_relatorio(codigo_laudo):
     """Carrega os dados de uma campanha ja gravada no banco e exibe o parecer em HTML."""
@@ -98,3 +119,55 @@ def baixar_relatorio_pdf(codigo_laudo):
     except Exception as e:
         flash(f"Erro ao gerar o arquivo PDF: {e}", "error")
         return redirect(url_for('ver_relatorio', codigo_laudo=codigo_laudo))
+
+
+@app.route('/laudo/<codigo_laudo>/excluir', methods=['POST'])
+def excluir_laudo_rota(codigo_laudo):
+    """Exclui uma campanha especifica e suas medicoes e eficiencias associadas."""
+    origem = request.form.get('origem', 'index')
+    try:
+        removido = excluir_laudo(codigo_laudo)
+        if removido:
+            flash(f"Laudo '{codigo_laudo}' excluído com sucesso.", "success")
+        else:
+            flash(f"Laudo '{codigo_laudo}' não encontrado.", "error")
+    except Exception as e:
+        flash(f"Não foi possível excluir o laudo: {e}", "error")
+
+    if origem == 'dashboard':
+        return redirect(url_for('dashboard'))
+    if origem == 'importar_pdf':
+        return redirect(url_for('importar_pdf'))
+    return redirect(url_for('index'))
+
+
+@app.route('/laudos/limpar', methods=['POST'])
+def limpar_laudos_rota():
+    """Limpa todos os laudos importados, preservando normas e parametros de referencia."""
+    origem = request.form.get('origem', 'index')
+    try:
+        total = limpar_todos_laudos()
+        if total > 0:
+            flash(f"Histórico limpo: {total} campanha(s) removida(s). Pronto para novas importações.", "success")
+        else:
+            flash("Não há campanhas gravadas para remover.", "success")
+    except Exception as e:
+        flash(f"Não foi possível limpar o histórico: {e}", "error")
+
+    if origem == 'dashboard':
+        return redirect(url_for('dashboard'))
+    if origem == 'importar_pdf':
+        return redirect(url_for('importar_pdf'))
+    return redirect(url_for('index'))
+
+
+@app.errorhandler(413)
+def arquivo_muito_grande(_error):
+    """Trata uploads acima do limite configurado de 16 MB com retorno amigavel."""
+    mensagem = "O arquivo enviado excede o limite máximo permitido de 16 MB."
+    if request.path.startswith('/api/'):
+        return jsonify({'erro': mensagem}), 413
+    flash(mensagem, "error")
+    if request.path == '/importar-pdf':
+        return redirect(url_for('importar_pdf'))
+    return redirect(url_for('index'))

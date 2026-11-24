@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Monitoramento de Efluentes - ETE Evonik{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/icon.svg') }}">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,17 +38,16 @@
 <body class="flex flex-col min-h-full font-sans text-slate-800 antialiased blueprint-grid selection:bg-[#971E84] selection:text-white">
 
     <header class="station-header sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-3">
             
             <div class="flex items-center space-x-3">
                 <a href="{{ url_for('index') }}" class="flex items-center space-x-3 text-slate-900 group">
-                    <span class="w-8 h-8 rounded-lg brand-badge flex items-center justify-center text-xs tracking-wider">
-                        EV
-                    </span>
+                    <img src="{{ url_for('static', filename='images/icon.svg') }}"
+                         alt="Monitoramento de Efluentes"
+                         class="w-8 h-8 rounded-lg shadow-xs shrink-0">
                     <div>
                         <div class="flex items-center space-x-2">
                             <span class="font-bold text-sm tracking-tight text-slate-900 group-hover:text-[#971E84] transition-colors">Evonik ETE</span>
-                            <span class="text-[10px] font-mono px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded border border-slate-200">Americana/SP</span>
                         </div>
                         <p class="text-[11px] text-slate-500 font-mono leading-none mt-0.5">Sistema de Avaliação Ambiental</p>
                     </div>
@@ -76,12 +76,17 @@
                     </svg>
                     <span>Leitor de PDF</span>
                 </a>
+                <a href="{{ url_for('dashboard') }}"
+                   class="nav-segment-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 3v18h18"/>
+                        <path d="M18 17V9"/>
+                        <path d="M13 17V5"/>
+                        <path d="M8 17v-3"/>
+                    </svg>
+                    <span>Dashboard Ambiental</span>
+                </a>
             </nav>
-
-            <div class="hidden md:flex items-center space-x-2 text-[11px] font-mono text-slate-500">
-                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>CONAMA 430 & 357 (Cl. 2)</span>
-            </div>
         </div>
     </header>
 
@@ -103,11 +108,7 @@
     </main>
 
     <footer class="border-t border-slate-200 bg-white/70 backdrop-blur-xs mt-auto py-5 text-xs text-slate-500">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-2">
-            <div class="flex items-center space-x-2 font-mono text-[11px]">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                <span>Estação de Tratamento de Efluentes Evonik • Americana/SP</span>
-            </div>
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 flex justify-center items-center text-center">
             <div class="text-[11px] font-mono text-slate-400">
                 Corpo Receptor: Rio Piracicaba • Parâmetros CONAMA e Decreto SP 8.468
             </div>

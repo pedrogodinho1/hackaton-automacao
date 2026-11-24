@@ -37,9 +37,10 @@ O objetivo do sistema é substituir o processo manual de conferência de laudos 
   - Fundo suave selecionado: `#fdf4fa` / `rgba(151, 30, 132, 0.05)`
   - Bordas de destaque: `rgba(151, 30, 132, 0.2)`
 - **Layout e Estética:**
-  - Fundo em tom `#fafbfc` com grade blueprint técnica (`blueprint-grid`) e cantoneiras de alinhamento (`+`).
-  - Navegação superior direta e minimalista com as abas lado a lado: **Relatório de Excel** e **Leitor de PDF**.
+  - Fundo em tom `#fafbfc` com grade blueprint técnica (`blueprint-grid`).
+  - Navegação superior direta e minimalista com as abas lado a lado: **Relatório de Excel**, **Leitor de PDF** e **Dashboard Ambiental**.
   - Ícones vetoriais padronizados no padrão Lucide SVG com traço fino e elegante.
+  - Gráficos dinâmicos no Dashboard Ambiental via Chart.js.
 
 ---
 
@@ -48,23 +49,28 @@ O objetivo do sistema é substituir o processo manual de conferência de laudos 
 ```text
 HACKATON/
 ├── app/
-│   ├── __init__.py          # Inicialização do Flask e SQLAlchemy
-│   ├── models.py            # Modelos relacionais do banco SQLite
-│   ├── routes.py            # Rotas web (Excel, PDF, visualização e download)
-│   ├── services.py          # Regras de negócio, parsers (Excel/PDF) e gerador PDF
+│   ├── __init__.py            # Inicialização do Flask, dotenv, limite de upload (16 MB) e SQLAlchemy
+│   ├── models.py              # Modelos relacionais do banco SQLite
+│   ├── routes.py              # Rotas web (Excel, PDF, Dashboard, API JSON, exclusão e download)
+│   ├── services.py            # Regras de negócio, parsers (Excel/PDF), agregação do dashboard e gerador PDF
+│   ├── static/
+│   │   ├── css/style.css      # Design system, grade blueprint, cards, tabelas e badges
+│   │   └── js/app.js          # Dropzones, filtros rápidos de tabela e feedback de envio
 │   └── templates/
-│       ├── base.html        # Layout base com barra de navegação compartilhada
-│       ├── index.html       # Página de upload e leitura de planilhas Excel
-│       ├── importar_pdf.html# Página dedicada à leitura automática de laudos PDF
-│       ├── relatorio.html   # Dashboard técnico e parecer de conformidade ambiental
+│       ├── base.html          # Layout base com barra de navegação compartilhada
+│       ├── index.html         # Página de upload e leitura de planilhas Excel
+│       ├── importar_pdf.html  # Página dedicada à leitura automática de laudos PDF
+│       ├── dashboard.html     # Dashboard Ambiental com KPIs, filtros e gráficos Chart.js
+│       ├── relatorio.html     # Parecer técnico completo e conformidade ambiental
 │       └── relatorio_pdf.html # Template estruturado para geração do PDF de auditoria
 ├── context/
-│   └── DEV-INSTRUCTIONS.md  # Este guia de diretrizes e especificações
+│   └── DEV-INSTRUCTIONS.md    # Este guia de diretrizes e especificações
 ├── instance/
-│   └── monitoramento.db     # Base SQLite local persistida
-├── tests/                   # Scripts e validações automatizadas
-├── run.py                   # Ponto de entrada para execução da aplicação Flask
-└── requirements.txt         # Dependências do projeto
+│   └── monitoramento.db       # Base SQLite local persistida
+├── tests/
+│   └── test_intermediario.py  # Suíte automatizada de validação das regras e rotas
+├── run.py                     # Ponto de entrada para execução da aplicação Flask
+└── requirements.txt           # Dependências do projeto
 ```
 
 ---
@@ -74,7 +80,7 @@ HACKATON/
 ### A. Eficiência de Remoção da ETE (P1 vs P2)
 - **Fórmula:** `Eficiência (%) = ((P1 - P2) / P1) * 100`
 - **Parâmetros de Carga Obrigatórios:**
-  - DBO5,20 (Demanda Bioquímica de Oxigênio): meta legal de remoção mínima de 80% (Art. 16, CONAMA 430/2011).
+  - DBO5,20 (Demanda Bioquímica de Oxigênio): meta legal de remoção mínima de 60% pela CONAMA 430/2011 (Art. 16) e limite máximo de concentração de 60,0 mg/L pelo Decreto SP 8.468/1976 (Art. 18, que prevê alternativamente remoção mínima de 80%).
   - DQO (Demanda Química de Oxigênio): controle operacional da planta.
   - SST (Sólidos Suspensos Totais): controle de sedimentação e separação física.
 
@@ -86,9 +92,9 @@ HACKATON/
 - Exemplo: Chumbo Total tem limite de 0,5 mg/L no CONAMA 430 e 0,1 mg/L no Decreto SP 8.468. O sistema adota 0,1 mg/L como teto de conformidade.
 
 ### C. Avaliação de Impacto no Rio Piracicaba (P3 vs P4)
-- Compara a concentração a jusante (P4) com o padrão de qualidade do **CONAMA 357/2005 para corpos hídricos Classe 2**.
+- Compara a concentração a jusante (P4) com os limites máximos e mínimos do **CONAMA 357/2005 para corpos hídricos Classe 2** (incluindo mínimo de OD e faixa de pH) e variação térmica de 3 °C.
 - Calcula o delta absoluto (`P4 - P3`) e percentual de variação.
-- Dispara alerta de impacto ambiental caso P4 ultrapasse o teto da Classe 2 ou quando houver elevação igual ou superior a 20% atribuível ao lançamento da ETE.
+- Dispara alerta de impacto ambiental caso P4 ultrapasse os limites da Classe 2 ou aviso de atenção quando houver elevação igual ou superior a 20% atribuível ao lançamento da ETE.
 
 ---
 
@@ -101,11 +107,17 @@ HACKATON/
 3. **`GET /importar-pdf` (Leitor de PDF):**
    - Apresenta a tela de seleção de arquivo PDF e histórico de laudos salvos.
 4. **`POST /importar-pdf`:**
-   - Extrai metadados, amostras P1 a P4, calcula eficiências, persiste de forma idempotente e exibe o parecer ambiental.
-5. **`GET /relatorio/<codigo_laudo>`:**
-   - Exibição visual detalhada de qualquer campanha salva no histórico.
-6. **`GET /relatorio/<codigo_laudo>/pdf`:**
+   - Extrai metadados e amostras P1 a P4 (tanto de laudos laboratoriais quanto de relatórios PDF exportados pelo sistema), calcula eficiências, persiste de forma idempotente e exibe o parecer ambiental.
+5. **`GET /dashboard` (Dashboard Ambiental):**
+   - Painel consolidado com KPIs, filtros de campanha e parâmetro, 5 gráficos dinâmicos em Chart.js, listas de alertas e histórico consolidado.
+6. **`GET /api/dashboard`:**
+   - Endpoint JSON que alimenta as atualizações dinâmicas dos filtros, gráficos e listas no Dashboard Ambiental.
+7. **`GET /relatorio/<codigo_laudo>`:**
+   - Exibição visual detalhada de qualquer campanha salva no histórico (KPIs, eficiência, monitoramento do rio e medições em P2).
+8. **`GET /relatorio/<codigo_laudo>/pdf`:**
    - Renderização em memória e download do laudo técnico oficial em formato PDF.
+9. **`POST /laudo/<codigo_laudo>/excluir` e `POST /laudos/limpar`:**
+   - Exclusão de uma campanha específica ou limpeza completa do histórico, preservando as tabelas de normas e limites legais.
 
 ---
 
@@ -118,11 +130,11 @@ HACKATON/
   - Comparação automatizada com a norma mais restritiva.
   - Relatório técnico interativo e exportação em PDF.
 
-- [x] **Nível Intermediário (Fase 1 Concluída):**
-  - Módulo de leitura automática de PDFs laboratoriais via `pypdf`.
-  - Separação da aplicação em páginas dedicadas (Relatório de Excel vs Leitor de PDF).
-  - Tratamento transacional idempotente para reprocessamento seguro de laudos.
-  - *Próximos passos:* Comparativos de tendências temporais e gráficos dinâmicos no dashboard.
+- [x] **Nível Intermediário (Concluído):**
+  - Módulo de leitura automática de PDFs laboratoriais e relatórios exportados pelo sistema via `pypdf`, independente da quantidade fixa de páginas e com detecção de PDFs escaneados.
+  - Separação da aplicação em abas dedicadas (Relatório de Excel, Leitor de PDF e Dashboard Ambiental).
+  - Dashboard Ambiental consolidado com filtros dinâmicos, gráficos Chart.js (conformidade, eficiência histórica, Rio Piracicaba, série de parâmetro em P2 e ranking de não conformidades).
+  - Tratamento transacional idempotente, exclusão/limpeza de laudos, limite de upload (16 MB) e suíte automatizada de testes.
 
 - [ ] **Nível Avançado (Planejado):**
   - Integração com Inteligência Artificial para parecer descritivo automatizado.
