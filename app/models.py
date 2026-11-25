@@ -1,8 +1,18 @@
+import math
 import re
 import unicodedata
-from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from app import db
+
+
+def _numero_valido(valor) -> bool:
+    """Retorna True apenas quando o valor e numerico finito (exclui None, NaN e Inf)."""
+    if valor is None or isinstance(valor, bool):
+        return False
+    try:
+        return math.isfinite(float(valor))
+    except (TypeError, ValueError):
+        return False
 
 
 def normalizar_texto(texto: str) -> str:
@@ -11,7 +21,10 @@ def normalizar_texto(texto: str) -> str:
     Converte subscritos (DBO5,20), sobrescritos (Cr6+), ions (CN-, F-),
     remove acentos, espacos extras e passa tudo para minusculo.
     """
-    if not texto:
+    if texto is None or (isinstance(texto, float) and not math.isfinite(texto)):
+        return ""
+    texto_str = str(texto)
+    if not texto_str.strip():
         return ""
     mapa_chars = str.maketrans({
         "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
@@ -20,7 +33,7 @@ def normalizar_texto(texto: str) -> str:
         "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
         "⁺": "+", "⁻": "-", "−": "-", "–": "-",
     })
-    t = texto.translate(mapa_chars).strip().lower()
+    t = texto_str.translate(mapa_chars).strip().lower()
     t = unicodedata.normalize("NFKD", t)
     t = "".join(c for c in t if not unicodedata.combining(c))
     t = re.sub(r"\s+", " ", t)
@@ -40,6 +53,38 @@ class PontoColeta(db.Model):
     matriz = db.Column(db.String(50), nullable=False)
     finalidade = db.Column(db.String(255), nullable=False)
     sinonimos = db.Column(db.String(255), nullable=True)
+
+    @classmethod
+    def montar_mapa_sinonimos(cls) -> dict:
+        """Constroi um dicionario normalizado de sinonimos para os codigos P1 a P4."""
+        mapa = {}
+        for ponto in cls.query.all():
+            cod = ponto.codigo.strip().upper()
+            mapa[normalizar_texto(cod)] = cod
+            mapa[normalizar_texto(ponto.nome)] = cod
+            if ponto.sinonimos:
+                for sin in ponto.sinonimos.split("|"):
+                    sin_norm = normalizar_texto(sin)
+                    if sin_norm:
+                        mapa[sin_norm] = cod
+        return mapa
+
+    @classmethod
+    def resolver_codigo(cls, texto_ponto: str, mapa_sinonimos: dict = None) -> str | None:
+        """Resolve qualquer rotulo ou sinonimo de ponto de coleta para P1, P2, P3 ou P4."""
+        t_norm = normalizar_texto(texto_ponto)
+        if not t_norm or t_norm in ("nan", "none"):
+            return None
+        match_cod = re.search(r"(?<![a-z0-9])(p[1-4])(?![a-z0-9])", t_norm)
+        if match_cod:
+            return match_cod.group(1).upper()
+        mapa = mapa_sinonimos if mapa_sinonimos is not None else cls.montar_mapa_sinonimos()
+        if t_norm in mapa:
+            return mapa[t_norm]
+        for sin_norm, cod in sorted(mapa.items(), key=lambda x: len(x[0]), reverse=True):
+            if len(sin_norm) >= 4 and re.search(r"(?<![a-z0-9])" + re.escape(sin_norm) + r"(?![a-z0-9])", t_norm):
+                return cod
+        return None
 
     def __repr__(self):
         return f"<PontoColeta {self.codigo}: {self.nome}>"
@@ -115,14 +160,15 @@ class LimiteLegal(db.Model):
                 "alerta": None
             }
 
-        if valor_medido is None:
+        if not _numero_valido(valor_medido):
             return {
                 "status_conformidade": "Sem Dados",
                 "em_conformidade": None,
                 "norma_violada": None,
-                "alerta": "Valor medido nao informado."
+                "alerta": "Valor medido não informado."
             }
 
+        valor_medido = float(valor_medido)
         violacoes = []
         detalhes = []
 
@@ -130,33 +176,45 @@ class LimiteLegal(db.Model):
         if self.limite_min_conama430 is not None and valor_medido < self.limite_min_conama430:
             atende_conama = False
             violacoes.append("CONAMA 430/2011")
-            detalhes.append(f"abaixo do minimo de {self.limite_min_conama430} {self.unidade}")
-        if self.limite_max_conama430 is not None and valor_medido > self.limite_max_conama430:
-            atende_conama = False
-            violacoes.append("CONAMA 430/2011")
-            detalhes.append(f"acima do limite maximo de {self.limite_max_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
-        if self.eficiencia_minima_pct is not None and eficiencia_pct is not None:
-            if eficiencia_pct < self.eficiencia_minima_pct:
+            detalhes.append(f"abaixo do mínimo de {self.limite_min_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
+        if self.limite_max_conama430 is not None:
+            estrito_conama = (self.texto_conama430 or "").strip().startswith("<")
+            excede_conama = valor_medido >= self.limite_max_conama430 if estrito_conama else valor_medido > self.limite_max_conama430
+            if excede_conama:
+                atende_conama = False
+                violacoes.append("CONAMA 430/2011")
+                if estrito_conama:
+                    detalhes.append(f"igual ou acima do limite de {self.limite_max_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
+                else:
+                    detalhes.append(f"acima do limite máximo de {self.limite_max_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
+        if self.eficiencia_minima_pct is not None and _numero_valido(eficiencia_pct):
+            ef_val = float(eficiencia_pct)
+            if ef_val < self.eficiencia_minima_pct:
                 atende_conama = False
                 if "CONAMA 430/2011" not in violacoes:
                     violacoes.append("CONAMA 430/2011")
-                detalhes.append(f"eficiencia ({eficiencia_pct:.1f}%) abaixo do minimo de {self.eficiencia_minima_pct:.0f}%")
+                detalhes.append(f"eficiência ({ef_val:.1f}%) abaixo do mínimo de {self.eficiencia_minima_pct:.0f}%")
 
         atende_decreto = True
         if self.limite_min_decreto8468 is not None and valor_medido < self.limite_min_decreto8468:
             atende_decreto = False
             violacoes.append("Decreto Estadual 8.468/1976")
-            detalhes.append(f"abaixo do minimo de {self.limite_min_decreto8468} {self.unidade}")
-        if self.limite_max_decreto8468 is not None and valor_medido > self.limite_max_decreto8468:
-            atende_decreto = False
-            violacoes.append("Decreto Estadual 8.468/1976")
-            if atende_conama and self.limite_max_conama430 is not None:
-                detalhes.append(
-                    f"atende a federal CONAMA 430/2011 (<= {self.limite_max_conama430} {self.unidade}), "
-                    f"mas ultrapassa o Decreto Estadual 8.468/1976 (<= {self.limite_max_decreto8468} {self.unidade})"
-                )
-            else:
-                detalhes.append(f"acima do limite maximo de {self.limite_max_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
+            detalhes.append(f"abaixo do mínimo de {self.limite_min_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
+        if self.limite_max_decreto8468 is not None:
+            estrito_decreto = (self.texto_decreto8468 or "").strip().startswith("<")
+            excede_decreto = valor_medido >= self.limite_max_decreto8468 if estrito_decreto else valor_medido > self.limite_max_decreto8468
+            if excede_decreto:
+                atende_decreto = False
+                violacoes.append("Decreto Estadual 8.468/1976")
+                if atende_conama and self.limite_max_conama430 is not None:
+                    detalhes.append(
+                        f"atende à federal CONAMA 430/2011 (<= {self.limite_max_conama430} {self.unidade}), "
+                        f"mas ultrapassa o Decreto Estadual 8.468/1976 (<= {self.limite_max_decreto8468} {self.unidade})"
+                    )
+                elif estrito_decreto:
+                    detalhes.append(f"igual ou acima do limite de {self.limite_max_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
+                else:
+                    detalhes.append(f"acima do limite máximo de {self.limite_max_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
 
         if not violacoes:
             return {
@@ -179,14 +237,16 @@ class LimiteLegal(db.Model):
         Calcula a remocao percentual da ETE: ((P1 - P2) / P1) * 100.
         Usa arredondamento tecnico (ROUND_HALF_UP) e valida contra a meta do parametro.
         """
-        if valor_p1 is None or valor_p2 is None or valor_p1 <= 0:
+        if not _numero_valido(valor_p1) or not _numero_valido(valor_p2) or float(valor_p1) <= 0:
             return {
                 "eficiencia_pct": None,
                 "avaliacao": "Sem Dados",
                 "atingiu_meta": None
             }
 
-        bruto = ((valor_p1 - valor_p2) / valor_p1) * 100.0
+        v1 = float(valor_p1)
+        v2 = float(valor_p2)
+        bruto = ((v1 - v2) / v1) * 100.0
         eficiencia = float(Decimal(str(bruto)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
         if self.eficiencia_minima_pct is not None:
@@ -231,81 +291,3 @@ class LimiteLegal(db.Model):
 
 # Mantido por compatibilidade com scripts legados
 ParametroNorma = LimiteLegal
-
-
-class Laudo(db.Model):
-    """
-    Agrupa as medicoes de uma campanha mensal em um unico registro historico.
-    """
-    __tablename__ = 'laudos'
-
-    id = db.Column(db.Integer, primary_key=True)
-    codigo_laudo = db.Column(db.String(100), unique=True, nullable=False)
-    unidade_monitorada = db.Column(db.String(150), nullable=True)
-    corpo_receptor = db.Column(db.String(150), nullable=True)
-    campanha_mes = db.Column(db.String(20), nullable=False)
-    data_coleta = db.Column(db.Date, nullable=False)
-    laboratorio = db.Column(db.String(150), nullable=True)
-    arquivo_origem = db.Column(db.String(255), nullable=True)
-    observacoes = db.Column(db.Text, nullable=True)
-    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-
-    # Se o laudo for apagado, remove em cascata suas medicoes e eficiencias
-    medicoes = db.relationship('ResultadoAnalise', backref='laudo', cascade='all, delete-orphan', lazy=True)
-    eficiencias = db.relationship('EficienciaETE', backref='laudo', cascade='all, delete-orphan', lazy=True)
-
-    def __repr__(self):
-        return f"<Laudo {self.codigo_laudo} - {self.campanha_mes}>"
-
-
-class ResultadoAnalise(db.Model):
-    """
-    Guarda uma medicao individual de um parametro em um ponto de coleta (P1 a P4).
-    """
-    __tablename__ = 'resultados_analise'
-
-    id = db.Column(db.Integer, primary_key=True)
-    laudo_id = db.Column(db.Integer, db.ForeignKey('laudos.id'), nullable=True)
-    codigo_laudo = db.Column(db.String(100), nullable=False)
-    data_coleta = db.Column(db.Date, nullable=False)
-    ponto_coleta = db.Column(db.String(20), nullable=False)
-    parametro_id = db.Column(db.Integer, db.ForeignKey('limites_legais.id'), nullable=True)
-    parametro = db.Column(db.String(100), nullable=False)
-    valor_medido = db.Column(db.Float, nullable=True)
-    valor_texto = db.Column(db.String(50), nullable=True)
-    unidade = db.Column(db.String(30), nullable=False)
-
-    status_conformidade = db.Column(db.String(50), nullable=True)
-    em_conformidade = db.Column(db.Boolean, nullable=True)
-    norma_violada = db.Column(db.String(150), nullable=True)
-    alerta = db.Column(db.Text, nullable=True)
-
-    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    limite_ref = db.relationship('LimiteLegal', backref='medicoes', lazy=True)
-
-    def __repr__(self):
-        return f"<Medicao {self.codigo_laudo} [{self.ponto_coleta}] {self.parametro}: {self.valor_medido} {self.unidade}>"
-
-
-class EficienciaETE(db.Model):
-    """
-    Registra as taxas de remocao calculadas entre a entrada (P1) e a saida (P2) da ETE.
-    """
-    __tablename__ = 'eficiencias_ete'
-
-    id = db.Column(db.Integer, primary_key=True)
-    laudo_id = db.Column(db.Integer, db.ForeignKey('laudos.id'), nullable=True)
-    codigo_laudo = db.Column(db.String(100), nullable=False)
-    data_referencia = db.Column(db.Date, nullable=False)
-    parametro = db.Column(db.String(100), nullable=False)
-    unidade = db.Column(db.String(30), nullable=False, default='mg/L')
-    entrada_p1 = db.Column(db.Float, nullable=False)
-    saida_p2 = db.Column(db.Float, nullable=False)
-    eficiencia_percentual = db.Column(db.Float, nullable=False)
-    avaliacao = db.Column(db.String(50), nullable=False)
-    atingiu_meta = db.Column(db.Boolean, nullable=True)
-
-    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-
-    def __repr__(self):
-        return f"<Eficiencia {self.parametro}: {self.eficiencia_percentual:.1f}% ({self.avaliacao})>"

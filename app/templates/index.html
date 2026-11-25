@@ -33,7 +33,7 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 
                 <div id="dropzone-excel" class="industrial-dropzone">
-                    <input type="file" name="arquivo" id="arquivo-excel" accept=".xlsx, .xls" required
+                    <input type="file" name="arquivo" id="arquivo-excel" accept=".xlsx" required
                            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
 
                     <div class="flex flex-col items-center pointer-events-none">
@@ -50,7 +50,7 @@
                             Arraste a planilha de resultados ou clique para buscar
                         </p>
                         <p class="text-xs text-slate-500 mt-1">
-                            Formatos suportados: .xlsx e .xls com abas estruturadas de amostragem
+                            Formato suportado: .xlsx com abas estruturadas de amostragem
                         </p>
                     </div>
                 </div>
@@ -137,10 +137,10 @@
                        placeholder="Filtrar campanha..."
                        class="table-search-input">
                 <span class="stamp-badge stamp-info">
-                    {{ campanhas|length }} campanhas cadastradas
+                    {{ campanhas|length }} {{ 'campanha na sessão' if campanhas|length == 1 else 'campanhas na sessão' }}
                 </span>
                 <form action="{{ url_for('limpar_laudos_rota') }}" method="POST"
-                      onsubmit="return confirm('Deseja excluir todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros cadastrados serão mantidos.');">
+                      data-confirm="Deseja excluir todas as campanhas importadas para visualizar outros laudos? As normas e parâmetros cadastrados serão mantidos.">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="origem" value="index">
                     <button type="submit" class="btn-industrial-danger py-1 px-2.5 text-[11px]">
@@ -184,7 +184,7 @@
                             </a>
                             <span class="text-slate-300">|</span>
                             <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
-                                  onsubmit="return confirm('Deseja excluir o laudo {{ c.codigo_laudo }}?');">
+                                  data-confirm="Deseja excluir o laudo {{ c.codigo_laudo }}?">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="origem" value="index">
                                 <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">

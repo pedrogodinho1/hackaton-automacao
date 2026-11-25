@@ -1,4 +1,5 @@
 import os
+import secrets
 from dotenv import load_dotenv
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -13,7 +14,7 @@ project_dir = os.path.dirname(basedir)
 instance_dir = os.path.join(project_dir, 'instance')
 os.makedirs(instance_dir, exist_ok=True)
 
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-hackathon-evonik-etec')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -27,5 +28,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Rotas e modelos precisam vir no final para evitar erro de import circular no Flask
+# Rotas, modelos e semente do banco de referencia precisam vir no final para evitar import circular
 from app import models, routes
+from app.seed import garantir_banco_referencia
+
+garantir_banco_referencia()

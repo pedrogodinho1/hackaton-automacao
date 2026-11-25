@@ -1,16 +1,96 @@
+from collections import OrderedDict
 import io
+import math
 import re
+import secrets
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from types import SimpleNamespace
-from flask import abort, render_template
+from flask import abort, has_request_context, render_template, session
 import pandas as pd
 import pypdf
 from xhtml2pdf import pisa
 from app.models import (
     LimiteLegal,
+    PontoColeta,
     normalizar_texto,
 )
+
+
+def sanitizar_float(valor) -> float | None:
+    """Converte o valor para float finito ou retorna None para None, NaN e Inf."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    try:
+        num = float(valor)
+        return num if math.isfinite(num) else None
+    except (TypeError, ValueError):
+        return None
+
+
+_REGEX_LEITURA_NUMERICA = re.compile(
+    r'^\s*([<>])?\s*([+-]?\d+(?:[.,]\d+)*)(?:\s*(?:mg/L|u\.pH|°C|mL/L|UNT|%))?\s*$',
+    re.IGNORECASE,
+)
+
+
+def converter_numero_br(valor) -> tuple[float | None, str]:
+    """
+    Converte leituras laboratoriais para float e texto original.
+    Suporta formato brasileiro com separador de milhar ('1.200,50'), decimal com virgula ('7,2'),
+    formato internacional ('1200.5') e limites de quantificacao ('< 0,01' -> metade do LQ).
+    Ignora observacoes textuais com numeros misturados (ex: 'ND - LQ 0,05', 'SMWW 5210').
+    """
+    if valor is None or isinstance(valor, bool):
+        return None, "Sem Dados"
+    if isinstance(valor, (int, float)):
+        num_direto = sanitizar_float(valor)
+        if num_direto is None:
+            return None, "Sem Dados"
+        return num_direto, str(valor).strip()
+    try:
+        if pd.isna(valor):
+            return None, "Sem Dados"
+    except (TypeError, ValueError):
+        pass
+
+    val_str = str(valor).strip()
+    if not val_str:
+        return None, "Sem Dados"
+
+    match_num = _REGEX_LEITURA_NUMERICA.match(val_str)
+    if not match_num:
+        return None, val_str
+
+    abaixo_lq = match_num.group(1) == '<'
+    num_parte = match_num.group(2)
+
+    if ',' in num_parte and '.' in num_parte:
+        if num_parte.rfind(',') > num_parte.rfind('.'):
+            num_parte = num_parte.replace('.', '').replace(',', '.')
+        else:
+            num_parte = num_parte.replace(',', '')
+    elif ',' in num_parte:
+        num_parte = num_parte.replace(',', '.')
+
+    num = sanitizar_float(num_parte)
+    if num is None:
+        return None, val_str
+    return (num / 2.0 if abaixo_lq else num), val_str
+
+
+def sanitizar_codigo_laudo(codigo: str, fallback: str = "LAUDO") -> str:
+    """Limpa o codigo do laudo removendo quebras, separadores de rota e caracteres inseguros para URL."""
+    texto = str(codigo or '').strip()
+    texto = re.sub(r'[\r\n\t]+', ' ', texto)
+    texto = re.sub(r'[/\\#?%]+', '-', texto)
+    texto = re.sub(r'\s+', ' ', texto)
+    texto = re.sub(r'-{2,}', '-', texto)
+    texto = texto.strip(' .-')
+    if not texto or texto in ('.', '..'):
+        return fallback
+    return texto[:80]
 
 
 @dataclass
@@ -66,13 +146,59 @@ class LaudoSessao:
     eficiencias: list = field(default_factory=list)
 
 
-_LAUDOS_SESSAO: dict[str, LaudoSessao] = {}
+_MAX_SESSOES_ATIVAS = 100
+_MAX_LAUDOS_POR_SESSAO = 100
+_SESSOES_LOCK = threading.RLock()
+_SESSOES_LAUDOS: OrderedDict[str, OrderedDict[str, LaudoSessao]] = OrderedDict()
+
+
+def _obter_id_sessao() -> str:
+    """Identifica a sessao atual do navegador (ou '__cli__' fora de requisicao HTTP)."""
+    if has_request_context():
+        sid = session.get('sid')
+        if not sid:
+            sid = secrets.token_hex(16)
+            session['sid'] = sid
+        return sid
+    return '__cli__'
+
+
+def _obter_armazenamento_sessao(criar: bool = False) -> OrderedDict[str, LaudoSessao] | None:
+    """Retorna o mapa de laudos isolado da sessao atual com limite de memoria (LRU)."""
+    sid = _obter_id_sessao()
+    store = _SESSOES_LAUDOS.get(sid)
+    if store is None:
+        if not criar:
+            return None
+        store = OrderedDict()
+        _SESSOES_LAUDOS[sid] = store
+        while len(_SESSOES_LAUDOS) > _MAX_SESSOES_ATIVAS:
+            _SESSOES_LAUDOS.popitem(last=False)
+    else:
+        _SESSOES_LAUDOS.move_to_end(sid)
+    return store
+
+
+def _salvar_laudos_sessao(novos_laudos: dict[str, LaudoSessao]) -> None:
+    """Grava ou atualiza laudos na sessao atual de forma thread-safe e com limite de itens."""
+    with _SESSOES_LOCK:
+        store = _obter_armazenamento_sessao(criar=True)
+        for codigo, laudo in novos_laudos.items():
+            store[codigo] = laudo
+            store.move_to_end(codigo)
+        while len(store) > _MAX_LAUDOS_POR_SESSAO:
+            store.popitem(last=False)
 
 
 def listar_laudos_sessao(ordem_desc: bool = True) -> list:
     """Retorna as campanhas importadas na sessao atual ordenadas por data de coleta."""
+    with _SESSOES_LOCK:
+        store = _obter_armazenamento_sessao(criar=False)
+        if not store:
+            return []
+        laudos = list(store.values())
     return sorted(
-        _LAUDOS_SESSAO.values(),
+        laudos,
         key=lambda l: (l.data_coleta, l.campanha_mes, l.codigo_laudo),
         reverse=ordem_desc,
     )
@@ -112,6 +238,15 @@ MAPA_COLUNAS_EXCEL = {
 }
 
 
+_ABAS_METADADOS_NORM = {
+    'metadados_amostras',
+    'metadados',
+    'informacoes',
+    'configuracao',
+    'cadastro',
+}
+
+
 def extrair_metadados_planilha(excel_file: pd.ExcelFile) -> dict:
     """
     Busca abas auxiliares de metadados na planilha (ex: Metadados_Amostras) para
@@ -119,13 +254,15 @@ def extrair_metadados_planilha(excel_file: pd.ExcelFile) -> dict:
     """
     metadados = {
         'laboratorio': 'Laboratório Acreditado',
-        'unidade_monitorada': 'ETE Industrial, Unidade Americana/SP',
+        'unidade_monitorada': 'ETE Industrial',
         'corpo_receptor': 'Rio Piracicaba (Classe 2)',
         'observacoes': 'Importação de dados laboratoriais via pandas.'
     }
 
-    nomes_abas_meta = ['Metadados_Amostras', 'Metadados', 'Informacoes', 'Configuracao', 'Cadastro']
-    aba_meta = next((s for s in excel_file.sheet_names if s in nomes_abas_meta), None)
+    aba_meta = next(
+        (s for s in excel_file.sheet_names if normalizar_texto(s).replace(' ', '_') in _ABAS_METADADOS_NORM),
+        None,
+    )
 
     if aba_meta:
         try:
@@ -151,54 +288,115 @@ def extrair_metadados_planilha(excel_file: pd.ExcelFile) -> dict:
 
 
 def selecionar_aba_dados(excel_file: pd.ExcelFile) -> str:
-    """Seleciona a aba principal de medicoes por nomes conhecidos ou usa a primeira aba."""
+    """Seleciona a aba principal de medicoes ignorando abas de metadados e validando cabecalhos."""
     abas = excel_file.sheet_names
     preferenciais = ['dados_importacao', 'dados', 'medicoes', 'resultados', 'laudo', 'planilha1']
     for p in preferenciais:
         for aba in abas:
-            if normalizar_texto(aba) == p:
+            if normalizar_texto(aba).replace(' ', '_') == p:
                 return aba
-    return abas[0]
+
+    candidatas = [
+        aba for aba in abas
+        if normalizar_texto(aba).replace(' ', '_') not in _ABAS_METADADOS_NORM
+    ]
+    for aba in candidatas:
+        try:
+            cols = pd.read_excel(excel_file, sheet_name=aba, nrows=0).columns
+            cols_canonicas = {
+                MAPA_COLUNAS_EXCEL.get(normalizar_texto(str(c)).replace(' ', '_'), '')
+                for c in cols
+            }
+            if {'parametro', 'resultado'}.issubset(cols_canonicas):
+                return aba
+        except Exception:
+            continue
+
+    return candidatas[0] if candidatas else abas[0]
 
 
 def padronizar_dataframe_pandas(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normaliza os nomes das colunas via dicionario de sinonimos, limpa linhas vazias
-    e extrai datas, mes de referencia e codigo do ponto de coleta (P1 a P4).
+    Normaliza os nomes das colunas via dicionario de sinonimos, consolida colunas duplicadas,
+    remove linhas sem parametro e resolve datas, mes de referencia e pontos P1 a P4.
     """
-    novas_colunas = {}
-    for col in df.columns:
-        col_limpa = normalizar_texto(str(col)).replace(' ', '_')
-        novas_colunas[col] = MAPA_COLUNAS_EXCEL.get(col_limpa, col_limpa)
+    df = df.dropna(how='all').copy()
 
-    df = df.rename(columns=novas_colunas).dropna(how='all')
+    # Consolida colunas que mapeiam para o mesmo nome canonico (priorizando o nome exato)
+    colunas_consolidadas = {}
+    prioridade_exata = {}
+    for idx, col in enumerate(df.columns):
+        col_limpa = normalizar_texto(str(col)).replace(' ', '_')
+        alvo = MAPA_COLUNAS_EXCEL.get(col_limpa, col_limpa) or f"col_{idx}"
+        serie = df.iloc[:, idx]
+        eh_exata = col_limpa == alvo
+        if alvo not in colunas_consolidadas:
+            colunas_consolidadas[alvo] = serie
+            prioridade_exata[alvo] = eh_exata
+        elif eh_exata and not prioridade_exata[alvo]:
+            colunas_consolidadas[alvo] = serie.combine_first(colunas_consolidadas[alvo])
+            prioridade_exata[alvo] = True
+        else:
+            colunas_consolidadas[alvo] = colunas_consolidadas[alvo].combine_first(serie)
+
+    df = pd.DataFrame(colunas_consolidadas)
 
     for obrigatoria in ['parametro', 'resultado']:
         if obrigatoria not in df.columns:
             raise ValueError(f"A planilha precisa ter a coluna '{obrigatoria}'.")
 
+    # Remove linhas de rodape/observacao onde a coluna parametro esta vazia
+    param_limpo = df['parametro'].map(lambda v: str(v).strip() if pd.notna(v) else '')
+    df = df[param_limpo.ne('') & param_limpo.str.lower().ne('nan')].copy()
+
+    if df.empty:
+        raise ValueError("A planilha não possui linhas de medições preenchidas.")
+
+    df['parametro'] = df['parametro'].map(lambda v: str(v).strip())
+
     if 'data_coleta' in df.columns:
-        df['data_coleta'] = pd.to_datetime(df['data_coleta'], errors='coerce')
+        datas_brutas = df['data_coleta']
+        datas_iso = pd.to_datetime(datas_brutas, format='%Y-%m-%d', errors='coerce')
+        datas_br = pd.to_datetime(datas_brutas, format='%d/%m/%Y', errors='coerce')
+        datas_parseadas = datas_iso.fillna(datas_br)
+        faltantes = datas_parseadas.isna() & datas_brutas.notna()
+        if faltantes.any():
+            datas_parseadas.loc[faltantes] = pd.to_datetime(
+                datas_brutas.loc[faltantes], errors='coerce', dayfirst=True
+            )
+        df['data_coleta'] = datas_parseadas
     else:
         df['data_coleta'] = pd.to_datetime(datetime.now().date())
 
+    mes_fallback = df['data_coleta'].dt.strftime('%Y-%m').fillna(date.today().strftime('%Y-%m'))
     if 'mes_referencia' not in df.columns or df['mes_referencia'].isna().all():
-        df['mes_referencia'] = df['data_coleta'].dt.strftime('%Y-%m')
+        df['mes_referencia'] = mes_fallback
     else:
-        df['mes_referencia'] = df['mes_referencia'].astype(str).str.strip()
+        mes_series = df['mes_referencia'].where(df['mes_referencia'].notna(), None)
+        mes_limpo = mes_series.map(lambda v: str(v).strip() if v is not None else '')
+        mes_limpo = mes_limpo.replace({'': None, 'nan': None, 'None': None, 'NaT': None})
+        df['mes_referencia'] = mes_limpo.fillna(mes_fallback).astype(str).str.strip()
 
-    # Se nao tiver codigo do ponto direto, tenta achar P1..P4 no texto da coluna
-    if 'codigo_ponto' in df.columns:
-        df['codigo_ponto'] = df['codigo_ponto'].astype(str).str.upper().str.strip()
-    elif 'ponto_coleta' in df.columns:
-        df['codigo_ponto'] = df['ponto_coleta'].astype(str).str.extract(r'(P[1-4])', flags=re.IGNORECASE)[0].str.upper()
+    # Resolve P1 a P4 usando tanto codigos diretos quanto sinonimos cadastrados em pontos_coleta
+    mapa_pontos = PontoColeta.montar_mapa_sinonimos()
+    if 'codigo_ponto' in df.columns or 'ponto_coleta' in df.columns:
+        serie_ponto = (
+            df['codigo_ponto'].combine_first(df['ponto_coleta'])
+            if ('codigo_ponto' in df.columns and 'ponto_coleta' in df.columns)
+            else (df['codigo_ponto'] if 'codigo_ponto' in df.columns else df['ponto_coleta'])
+        )
+        df['codigo_ponto'] = serie_ponto.map(
+            lambda v: PontoColeta.resolver_codigo(v, mapa_sinonimos=mapa_pontos) or ''
+        )
     else:
         df['codigo_ponto'] = 'P2'
 
     if 'unidade' not in df.columns:
-        df['unidade'] = 'mg/L'
+        df['unidade'] = ''
     else:
-        df['unidade'] = df['unidade'].astype(str).str.strip()
+        df['unidade'] = df['unidade'].map(
+            lambda v: '' if (pd.isna(v) or str(v).strip().lower() in ('', 'nan', 'none')) else str(v).strip()
+        )
 
     return df
 
@@ -219,18 +417,21 @@ def calcular_eficiencias_campanha(df_mes: pd.DataFrame, codigo_laudo: str, data_
         row_p1 = df_p1.loc[param_norm]
         row_p2 = df_p2.loc[param_norm]
 
-        v1 = float(row_p1['resultado_num'].iloc[0] if isinstance(row_p1, pd.DataFrame) else row_p1['resultado_num'])
-        v2 = float(row_p2['resultado_num'].iloc[0] if isinstance(row_p2, pd.DataFrame) else row_p2['resultado_num'])
+        v1 = sanitizar_float(row_p1['resultado_num'].iloc[0] if isinstance(row_p1, pd.DataFrame) else row_p1['resultado_num'])
+        v2 = sanitizar_float(row_p2['resultado_num'].iloc[0] if isinstance(row_p2, pd.DataFrame) else row_p2['resultado_num'])
         nome_param = str(row_p1['parametro'].iloc[0] if isinstance(row_p1, pd.DataFrame) else row_p1['parametro'])
-        unidade = str(row_p1['unidade'].iloc[0] if isinstance(row_p1, pd.DataFrame) else row_p1['unidade'])
+        unidade_raw = str(row_p1['unidade'].iloc[0] if isinstance(row_p1, pd.DataFrame) else row_p1['unidade']).strip()
 
-        if v1 > 0:
+        if v1 is not None and v2 is not None and v1 > 0:
             regra_param = LimiteLegal.buscar_por_nome(nome_param)
             # So calcula remocao para parametros de carga (DBO, DQO, SST), nao para pH ou temperatura
             if not regra_param or not regra_param.calcula_eficiencia:
                 continue
 
+            unidade = unidade_raw or regra_param.unidade or 'mg/L'
             avaliacao_ef = regra_param.avaliar_eficiencia(v1, v2)
+            if avaliacao_ef['eficiencia_pct'] is None:
+                continue
 
             ef_obj = EficienciaSessao(
                 codigo_laudo=codigo_laudo,
@@ -263,12 +464,29 @@ def classificar_impacto_rio(regra, nome_param: str, v3: float, v4: float, unidad
     Verifica limites maximos e minimos do CONAMA 357/2005 (Classe 2), variacao termica
     de 3 graus Celsius e elevacoes >= 20% atribuiveis ao lancamento da ETE.
     """
-    v3_val = float(v3) if v3 is not None else 0.0
-    v4_val = float(v4) if v4 is not None else 0.0
+    v3_val = sanitizar_float(v3)
+    v4_val = sanitizar_float(v4)
+    v2_val = sanitizar_float(v2)
+
+    param_oficial = regra.parametro if regra else nome_param
+    if v3_val is None or v4_val is None:
+        return {
+            'parametro': param_oficial,
+            'montante_p3': v3_val,
+            'jusante_p4': v4_val,
+            'diferenca': None,
+            'variacao_pct': None,
+            'unidade': unidade,
+            'status_rio': 'Sem Dados',
+            'alerta_impacto': None,
+            'limite_classe2': regra.texto_conama357 if regra else 'Não tabelado',
+            'limite_max_classe2': regra.limite_max_conama357 if regra else None,
+            'limite_min_classe2': regra.limite_min_conama357 if regra else None,
+        }
+
     delta = round(v4_val - v3_val, 3)
     var_pct = round(((v4_val - v3_val) / v3_val) * 100.0, 1) if v3_val > 0 else 0.0
 
-    param_oficial = regra.parametro if regra else nome_param
     param_norm = normalizar_texto(param_oficial)
     status_rio = "Normal"
     alerta_impacto = None
@@ -295,10 +513,10 @@ def classificar_impacto_rio(regra, nome_param: str, v3: float, v4: float, unidad
         )
     elif delta > 0 and var_pct >= 20.0 and 'oxigenio dissolvido' not in param_norm:
         status_rio = "Atenção"
-        if v2 is not None:
+        if v2_val is not None:
             alerta_impacto = (
                 f"Elevação de {var_pct:+.1f}% no rio após o lançamento "
-                f"(P3 = {v3_val} -> P4 = {v4_val} {unidade}). Concentração no Tratado (P2 = {v2} {unidade}). "
+                f"(P3 = {v3_val} -> P4 = {v4_val} {unidade}). Concentração no Tratado (P2 = {v2_val} {unidade}). "
                 f"Recomenda-se investigar a contribuição da ETE."
             )
         else:
@@ -339,19 +557,22 @@ def avaliar_impacto_corpo_receptor(df_mes: pd.DataFrame) -> list:
         row_p3 = df_p3.loc[param_norm]
         row_p4 = df_p4.loc[param_norm]
 
-        v3 = float(row_p3['resultado_num'].iloc[0] if isinstance(row_p3, pd.DataFrame) else row_p3['resultado_num'])
-        v4 = float(row_p4['resultado_num'].iloc[0] if isinstance(row_p4, pd.DataFrame) else row_p4['resultado_num'])
+        v3 = sanitizar_float(row_p3['resultado_num'].iloc[0] if isinstance(row_p3, pd.DataFrame) else row_p3['resultado_num'])
+        v4 = sanitizar_float(row_p4['resultado_num'].iloc[0] if isinstance(row_p4, pd.DataFrame) else row_p4['resultado_num'])
+        if v3 is None or v4 is None:
+            continue
+
         nome_param = str(row_p3['parametro'].iloc[0] if isinstance(row_p3, pd.DataFrame) else row_p3['parametro'])
-        unidade = str(row_p3['unidade'].iloc[0] if isinstance(row_p3, pd.DataFrame) else row_p3['unidade'])
+        unidade_raw = str(row_p3['unidade'].iloc[0] if isinstance(row_p3, pd.DataFrame) else row_p3['unidade']).strip()
 
         v2 = None
         if param_norm in df_p2.index:
             row_p2 = df_p2.loc[param_norm]
             v2_raw = row_p2['resultado_num'].iloc[0] if isinstance(row_p2, pd.DataFrame) else row_p2['resultado_num']
-            if pd.notna(v2_raw):
-                v2 = float(v2_raw)
+            v2 = sanitizar_float(v2_raw)
 
         regra = LimiteLegal.buscar_por_nome(nome_param)
+        unidade = unidade_raw or (regra.unidade if regra else 'mg/L')
         impactos.append(classificar_impacto_rio(regra, nome_param, v3, v4, unidade, v2=v2))
 
     return impactos
@@ -362,32 +583,28 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
     Le a planilha Excel via pandas, valida as regras ambientais e salva no banco.
     Aceita tanto caminho de arquivo em disco quanto o buffer vindo do upload HTTP.
     """
-    excel_file = pd.ExcelFile(origem_arquivo, engine='openpyxl')
+    try:
+        excel_file = pd.ExcelFile(origem_arquivo, engine='openpyxl')
+    except Exception as exc:
+        raise ValueError("A planilha .xlsx está corrompida ou em um formato incompatível.") from exc
     metadados = extrair_metadados_planilha(excel_file)
 
     nome_aba = selecionar_aba_dados(excel_file)
     df_bruto = pd.read_excel(excel_file, sheet_name=nome_aba)
     df = padronizar_dataframe_pandas(df_bruto)
-    df['parametro_normalizado'] = df['parametro'].apply(normalizar_texto)
 
-    # Trata valores com limite de quantificacao (ex: "< 0,01")
-    def tratar_resultado(val):
-        if pd.isna(val):
-            return None, "Sem Dados"
-        val_str = str(val).strip()
-        if val_str.startswith('<'):
-            num_parte = re.sub(r'[^\d,\.]', '', val_str).replace(',', '.')
-            try:
-                # Usa metade do limite de quantificacao para as contas numericas
-                return float(num_parte) / 2.0, val_str
-            except ValueError:
-                return None, val_str
-        try:
-            return float(str(val).replace(',', '.')), val_str
-        except ValueError:
-            return None, val_str
+    # Resolve sinonimos para o nome canonico do LimiteLegal antes de parear P1/P2 e P3/P4
+    cache_regras = {}
+    def _chave_canonica_parametro(nome_bruto: str) -> str:
+        norm = normalizar_texto(nome_bruto)
+        if norm not in cache_regras:
+            cache_regras[norm] = LimiteLegal.buscar_por_nome(nome_bruto)
+        regra = cache_regras[norm]
+        return normalizar_texto(regra.parametro) if regra else norm
 
-    tratados = df['resultado'].apply(tratar_resultado)
+    df['parametro_normalizado'] = df['parametro'].apply(_chave_canonica_parametro)
+
+    tratados = df['resultado'].apply(converter_numero_br)
     df['resultado_num'] = [t[0] for t in tratados]
     df['resultado_txt'] = [t[1] for t in tratados]
 
@@ -405,11 +622,44 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
     }
 
     novos_laudos = {}
+    meses_ordenados = sorted(df['mes_referencia'].unique())
 
-    for mes in sorted(df['mes_referencia'].unique()):
+    # Evita colisao quando a mesma planilha multi-mes repete o mesmo id_laudo em meses diferentes
+    codigos_brutos_por_mes = {}
+    for mes in meses_ordenados:
+        df_m = df[df['mes_referencia'] == mes]
+        cod_bruto = None
+        if 'id_laudo' in df_m.columns:
+            ids_validos = [
+                str(v).strip()
+                for v in df_m['id_laudo'].dropna().tolist()
+                if str(v).strip() and str(v).strip().lower() not in ('nan', 'none')
+            ]
+            if ids_validos:
+                cod_bruto = sanitizar_codigo_laudo(ids_validos[0], fallback='')
+        codigos_brutos_por_mes[mes] = cod_bruto or None
+
+    contagem_codigos = {}
+    for cod in codigos_brutos_por_mes.values():
+        if cod:
+            contagem_codigos[cod] = contagem_codigos.get(cod, 0) + 1
+
+    for mes in meses_ordenados:
         df_mes = df[df['mes_referencia'] == mes]
         data_coleta_mes = df_mes['data_coleta'].dropna().iloc[0].date() if not df_mes['data_coleta'].isna().all() else date.today()
-        codigo_campanha = f"CAMP-{mes}"
+        codigo_base = codigos_brutos_por_mes[mes]
+        if codigo_base and contagem_codigos.get(codigo_base, 0) > 1:
+            codigo_candidato = f"{codigo_base}-{mes}"
+        elif codigo_base:
+            codigo_candidato = codigo_base
+        else:
+            codigo_candidato = f"CAMP-{mes}"
+        codigo_campanha = sanitizar_codigo_laudo(
+            codigo_candidato,
+            fallback=sanitizar_codigo_laudo(f"CAMP-{mes}", fallback="CAMP-SESSAO"),
+        )
+        if codigo_campanha in novos_laudos:
+            codigo_campanha = sanitizar_codigo_laudo(f"{codigo_campanha}-{mes}", fallback=f"CAMP-{len(novos_laudos) + 1}")
 
         eficiencias_mes, eficiencias_objs = calcular_eficiencias_campanha(df_mes, codigo_campanha, data_coleta_mes)
         eficiencias_map = {e['parametro']: e['eficiencia_pct'] for e in eficiencias_mes}
@@ -420,11 +670,10 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
         for _, row in df_mes.iterrows():
             nome_param = str(row['parametro']).strip()
             ponto = str(row['codigo_ponto']).strip().upper()
-            val_num = row['resultado_num']
+            val_num = sanitizar_float(row['resultado_num'])
             val_txt = row['resultado_txt']
-            unidade = str(row['unidade']).strip()
-
             regra_param = LimiteLegal.buscar_por_nome(nome_param)
+            unidade = str(row['unidade']).strip() or (regra_param.unidade if regra_param else 'mg/L')
 
             status_conf = "Informativo"
             em_conf = None
@@ -470,13 +719,13 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
 
         novos_laudos[codigo_campanha] = LaudoSessao(
             codigo_laudo=codigo_campanha,
-            unidade_monitorada=metadados['unidade_monitorada'],
-            corpo_receptor=metadados['corpo_receptor'],
-            campanha_mes=mes,
+            unidade_monitorada=metadados['unidade_monitorada'][:150],
+            corpo_receptor=metadados['corpo_receptor'][:150],
+            campanha_mes=str(mes).strip()[:32],
             data_coleta=data_coleta_mes,
-            laboratorio=metadados['laboratorio'],
-            arquivo_origem=nome_arquivo,
-            observacoes=metadados['observacoes'],
+            laboratorio=metadados['laboratorio'][:150],
+            arquivo_origem=str(nome_arquivo)[:255],
+            observacoes=metadados['observacoes'][:500],
             medicoes=medicoes_mes,
             eficiencias=eficiencias_objs,
         )
@@ -498,8 +747,16 @@ def importar_relatorio_excel(origem_arquivo, nome_arquivo: str = "relatorio.xlsx
             'impactos_rio': impactos_rio_mes
         }
 
-    _LAUDOS_SESSAO.update(novos_laudos)
+    _salvar_laudos_sessao(novos_laudos)
     return resultado_processamento
+
+
+def _mapear_primeira_medicao(medicoes: list) -> dict:
+    """Mapeia cada parametro mantendo sempre a primeira medicao (alinhado ao iloc[0] da importacao)."""
+    mapa = {}
+    for m in medicoes:
+        mapa.setdefault(m.parametro, m)
+    return mapa
 
 
 def obter_contexto_relatorio(codigo_laudo: str) -> dict:
@@ -507,7 +764,9 @@ def obter_contexto_relatorio(codigo_laudo: str) -> dict:
     Recupera os dados completos de uma campanha carregada na sessao atual.
     Reaproveitado tanto para a tela HTML quanto para a geracao do relatorio em PDF.
     """
-    laudo = _LAUDOS_SESSAO.get(codigo_laudo)
+    with _SESSOES_LOCK:
+        store = _obter_armazenamento_sessao(criar=False)
+        laudo = store.get(codigo_laudo) if store else None
     if not laudo:
         abort(404)
     medicoes_p2 = [m for m in laudo.medicoes if m.ponto_coleta == 'P2']
@@ -517,16 +776,18 @@ def obter_contexto_relatorio(codigo_laudo: str) -> dict:
 
     # Monta o comparativo de qualidade do Rio Piracicaba (P3 vs P4)
     impactos_rio = []
-    p3_map = {m.parametro: m for m in medicoes_p3}
-    p4_map = {m.parametro: m for m in medicoes_p4}
-    p2_map = {m.parametro: m for m in medicoes_p2}
+    p3_map = _mapear_primeira_medicao(medicoes_p3)
+    p4_map = _mapear_primeira_medicao(medicoes_p4)
+    p2_map = _mapear_primeira_medicao(medicoes_p2)
 
     for param_nome, m3 in p3_map.items():
         if param_nome in p4_map:
             m4 = p4_map[param_nome]
-            v3 = m3.valor_medido or 0.0
-            v4 = m4.valor_medido or 0.0
-            v2 = p2_map[param_nome].valor_medido if param_nome in p2_map else None
+            v3 = sanitizar_float(m3.valor_medido)
+            v4 = sanitizar_float(m4.valor_medido)
+            if v3 is None or v4 is None:
+                continue
+            v2 = sanitizar_float(p2_map[param_nome].valor_medido) if param_nome in p2_map else None
 
             regra = LimiteLegal.buscar_por_nome(param_nome)
             impactos_rio.append(classificar_impacto_rio(regra, param_nome, v3, v4, m4.unidade, v2=v2))
@@ -605,15 +866,40 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
     quanto relatorios tecnicos exportados pelo proprio sistema, recalculando
     eficiencias da ETE, nao conformidades em P2 e impactos no Rio Piracicaba.
     """
-    reader = pypdf.PdfReader(origem_pdf)
+    try:
+        reader = pypdf.PdfReader(origem_pdf)
+    except pypdf.errors.PdfReadError as exc:
+        raise ValueError("O arquivo PDF está corrompido ou incompleto e não pôde ser lido.") from exc
+
+    if reader.is_encrypted:
+        try:
+            if not reader.decrypt(""):
+                raise ValueError("O arquivo PDF está protegido por senha. Envie uma versão desbloqueada do laudo.")
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("O arquivo PDF está protegido por senha. Envie uma versão desbloqueada do laudo.")
+
     num_paginas = len(reader.pages)
     if num_paginas == 0:
         raise ValueError("O arquivo PDF enviado está vazio ou não possui páginas legíveis.")
 
     textos_paginas = []
     for p in reader.pages:
-        txt = p.extract_text() or ""
-        txt = txt.replace('\u2212', '-').replace('\u2014', '-').replace('\u2264', '<=').replace('\u2265', '>=')
+        try:
+            txt = p.extract_text() or ""
+        except pypdf.errors.FileNotDecryptedError:
+            raise ValueError("O arquivo PDF está protegido por senha. Envie uma versão desbloqueada do laudo.")
+        except pypdf.errors.PdfReadError as exc:
+            raise ValueError("O arquivo PDF está corrompido ou incompleto e não pôde ser lido.") from exc
+        txt = (
+            txt.replace('\u2212', '-')
+            .replace('\u2014', '-')
+            .replace('\u2264', '<=')
+            .replace('\u2265', '>=')
+            .replace('\u00baC', '°C')
+            .replace('\u00bac', '°C')
+        )
         textos_paginas.append(txt)
 
     texto_completo = "\n".join(textos_paginas)
@@ -624,44 +910,37 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         )
 
     texto_efluentes, texto_rio = separar_secoes_pdf(texto_completo, textos_paginas)
-
-    def converter_valor(v_str):
-        if not v_str:
-            return None, "Sem Dados"
-        v_limpo = v_str.strip()
-        if v_limpo.startswith('<'):
-            num_parte = re.sub(r'[^\d,\.]', '', v_limpo).replace(',', '.')
-            try:
-                # Adota metade do limite de quantificacao (< LQ) para calculos numericos
-                return float(num_parte) / 2.0, v_limpo
-            except ValueError:
-                return None, v_limpo
-        num_txt = v_limpo
-        if ',' in num_txt and '.' in num_txt:
-            num_txt = num_txt.replace('.', '').replace(',', '.')
-        elif ',' in num_txt:
-            num_txt = num_txt.replace(',', '.')
-        try:
-            return float(num_txt), v_limpo
-        except ValueError:
-            return None, v_limpo
+    converter_valor = converter_numero_br
 
     todos_limites = LimiteLegal.query.all()
     limites_ordenados = sorted(todos_limites, key=lambda l: len(l.parametro), reverse=True)
+    sinonimos_ordenados = []
+    for regra in limites_ordenados:
+        if regra.sinonimos:
+            for sin in regra.sinonimos.split('|'):
+                sin_norm = normalizar_texto(sin)
+                if sin_norm:
+                    sinonimos_ordenados.append((sin_norm, regra))
+    sinonimos_ordenados.sort(key=lambda item: len(item[0]), reverse=True)
+
+    def _contem_termo(termo_norm: str, texto_norm: str) -> bool:
+        if not termo_norm or not texto_norm:
+            return False
+        return bool(re.search(r'(?<![a-z0-9])' + re.escape(termo_norm) + r'(?![a-z0-9])', texto_norm))
 
     def casar_limite_legal(texto_linha):
         t_norm = normalizar_texto(texto_linha)
+        if not t_norm:
+            return None
         for regra in limites_ordenados:
-            if normalizar_texto(regra.parametro) in t_norm:
+            if _contem_termo(normalizar_texto(regra.parametro), t_norm):
+                return regra
+        for sin_norm, regra in sinonimos_ordenados:
+            if _contem_termo(sin_norm, t_norm):
                 return regra
         for regra in limites_ordenados:
-            if regra.sinonimos:
-                for sin in regra.sinonimos.split('|'):
-                    if normalizar_texto(sin) in t_norm:
-                        return regra
-        for regra in limites_ordenados:
             if regra.simbolo and len(regra.simbolo) > 1:
-                if re.search(r'\b' + re.escape(normalizar_texto(regra.simbolo)) + r'\b', t_norm):
+                if _contem_termo(normalizar_texto(regra.simbolo), t_norm):
                     return regra
         return None
 
@@ -677,15 +956,20 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
 
     if eh_relatorio_sistema:
         def buscar_linha_seguinte(rotulo, default=""):
-            m = re.search(rf'{rotulo}:\s*\n\s*([^\n]+)', texto_completo)
-            return m.group(1).strip() if m else default
+            m = re.search(rf'{rotulo}:\s*([^\n]+)', texto_completo)
+            if not m:
+                return default
+            val = m.group(1).strip()
+            if not val or val.endswith(':'):
+                return default
+            return val
 
-        codigo_campanha = buscar_linha_seguinte('Código do Laudo', 'LAUDO-PDF')
-        mes_referencia = buscar_linha_seguinte('Mês Referência', date.today().strftime('%Y-%m'))
+        codigo_campanha = sanitizar_codigo_laudo(buscar_linha_seguinte('Código do Laudo', 'LAUDO-PDF'), fallback='LAUDO-PDF')
+        mes_referencia = buscar_linha_seguinte('Mês Referência', date.today().strftime('%Y-%m'))[:32]
         data_coleta_str = buscar_linha_seguinte('Data da Coleta', '')
-        laboratorio = buscar_linha_seguinte('Laboratório', 'Laboratório Acreditado')
-        unidade_monitorada = buscar_linha_seguinte('Unidade', 'ETE Industrial - Unidade Americana/SP')
-        corpo_receptor = buscar_linha_seguinte('Corpo Receptor', 'Rio Piracicaba (Classe 2)')
+        laboratorio = buscar_linha_seguinte('Laboratório', 'Laboratório Acreditado')[:150]
+        unidade_monitorada = buscar_linha_seguinte('Unidade', 'ETE Industrial')[:150]
+        corpo_receptor = buscar_linha_seguinte('Corpo Receptor', 'Rio Piracicaba (Classe 2)')[:150]
 
         data_coleta = date.today()
         if data_coleta_str:
@@ -699,7 +983,7 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         linhas_sys = [l.strip() for l in texto_completo.splitlines() if l.strip()]
         secao_atual = None
         i = 0
-        regex_val_unid = re.compile(r'^([<>]?\s*[\d,\.]+)\s+(.+)$')
+        regex_val_unid = re.compile(r'^([<>]?\s*[+-]?[\d,\.]+)\s+(.+)$')
 
         while i < len(linhas_sys):
             linha = linhas_sys[i]
@@ -794,16 +1078,17 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
                         'alerta': None
                     })
 
-                    item_impacto = classificar_impacto_rio(regra, nome_param, v3_num, v4_num, unidade)
-                    item_impacto['mes'] = mes_referencia
-                    impactos_rio.append(item_impacto)
+                    if v3_num is not None and v4_num is not None:
+                        item_impacto = classificar_impacto_rio(regra, nome_param, v3_num, v4_num, unidade)
+                        item_impacto['mes'] = mes_referencia
+                        impactos_rio.append(item_impacto)
                     i += 3
                     continue
 
             elif secao_atual == 'p2' and i + 2 < len(linhas_sys):
                 val_cand = linhas_sys[i + 1]
                 unid_cand = linhas_sys[i + 2]
-                if re.match(r'^[<>]?\s*[\d,\.]+$', val_cand):
+                if re.match(r'^[<>]?\s*[+-]?[\d,\.]+$', val_cand) or normalizar_texto(val_cand) == 'sem dados':
                     regra = casar_limite_legal(linha)
                     nome_param = regra.parametro if regra else linha
                     v2_num, v2_txt = converter_valor(val_cand)
@@ -854,16 +1139,17 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
             m = re.search(padrao, texto_completo)
             if m:
                 val = m.group(1).strip()
-                val = re.sub(r'^\[|\]$', '', val).strip()
-                return val
+                val = re.sub(r'^\[|\]$', '', val).strip(' :')
+                return val or default
             return default
 
-        codigo_laudo_bruto = buscar_campo(r'Código do Laudo\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'LAUDO-PDF')
-        data_coleta_str = buscar_campo(r'Data da Coleta\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
-        unidade_monitorada = buscar_campo(r'Unidade Monitorada\s*\[?(.*?)\]?(?:\s+Campanha|$)', 'ETE Industrial - Unidade Americana/SP')
-        campanha_mes_str = buscar_campo(r'Campanha\s*/\s*Mês\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', '')
-        corpo_receptor = buscar_campo(r'Corpo Receptor\s*\[?(.*?)\]?(?:\s+Laboratório|$)', 'Rio Piracicaba (Classe 2)')
-        laboratorio = buscar_campo(r'Laboratório\s*\[?(.*?)\]?(?:\s+[A-Z]|$)', 'Laboratório Acreditado')
+        prox_campo = r'(?=\s+(?:Código do Laudo|Data da Coleta|Unidade Monitorada|Campanha\s*/\s*Mês|Corpo Receptor|Laboratório)\b|\r?\n|$)'
+        codigo_laudo_bruto = buscar_campo(rf'Código do Laudo\s*:?\s*\[?(.*?)\]?{prox_campo}', 'LAUDO-PDF')
+        data_coleta_str = buscar_campo(rf'Data da Coleta\s*:?\s*\[?(.*?)\]?{prox_campo}', '')
+        unidade_monitorada = buscar_campo(rf'Unidade Monitorada\s*:?\s*\[?(.*?)\]?{prox_campo}', 'ETE Industrial')
+        campanha_mes_str = buscar_campo(rf'Campanha\s*/\s*Mês\s*:?\s*\[?(.*?)\]?{prox_campo}', '')
+        corpo_receptor = buscar_campo(rf'Corpo Receptor\s*:?\s*\[?(.*?)\]?{prox_campo}', 'Rio Piracicaba (Classe 2)')
+        laboratorio = buscar_campo(rf'Laboratório\s*:?\s*\[?(.*?)\]?{prox_campo}', 'Laboratório Acreditado')
 
         data_coleta = date.today()
         if data_coleta_str and not any(ph in data_coleta_str.upper() for ph in ['DD/', 'AAAA', 'MM/']):
@@ -882,10 +1168,15 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
             elif re.match(r'^\d{4}-\d{2}$', campanha_mes_str):
                 mes_referencia = campanha_mes_str
 
-        if 'ANO' in codigo_laudo_bruto or '001' in codigo_laudo_bruto or not codigo_laudo_bruto:
-            codigo_campanha = f"CAMP-{mes_referencia}"
+        eh_placeholder_codigo = (
+            not codigo_laudo_bruto
+            or bool(re.search(r'\b(ANO|XXXX|NNNN|MODELO)\b', codigo_laudo_bruto, re.IGNORECASE))
+            or codigo_laudo_bruto.upper() in ('LAUDO-ANO-001', 'LAUDO-001', 'LAUDO-PDF')
+        )
+        if eh_placeholder_codigo:
+            codigo_campanha = sanitizar_codigo_laudo(f"CAMP-{mes_referencia}", fallback="CAMP-PDF")
         else:
-            codigo_campanha = codigo_laudo_bruto
+            codigo_campanha = sanitizar_codigo_laudo(codigo_laudo_bruto, fallback=f"CAMP-{mes_referencia}")
 
         t2_tratado = texto_efluentes
         for quebra, uniao in [
@@ -908,7 +1199,7 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         ]:
             t2_tratado = re.sub(quebra, uniao, t2_tratado, flags=re.IGNORECASE)
 
-        regex_p1_p2 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L)\s+([\d,\.<]+)\s+([\d,\.<]+)'
+        regex_p1_p2 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)'
         pares_efluente = []
         for raw_param, unidade, v1_str, v2_str in re.findall(regex_p1_p2, t2_tratado):
             regra = casar_limite_legal(raw_param)
@@ -994,7 +1285,7 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         ]:
             t3_tratado = re.sub(quebra, uniao, t3_tratado, flags=re.IGNORECASE)
 
-        regex_p3_p4 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L|UNT)\s+([\d,\.<]+)\s+([\d,\.<]+)\s+([\+\-]?[\d,\.]+)'
+        regex_p3_p4 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L|UNT)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)\s+([\+\-]?[\d,\.]+)'
 
         for raw_param, unidade, v3_str, v4_str, delta_str in re.findall(regex_p3_p4, t3_tratado):
             regra = casar_limite_legal(raw_param)
@@ -1033,21 +1324,27 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
                 'alerta': None
             })
 
-            item_impacto = classificar_impacto_rio(
-                regra,
-                nome_param,
-                v3_num,
-                v4_num,
-                unidade,
-                v2=p2_valores_map.get(nome_param)
-            )
-            item_impacto['mes'] = mes_referencia
-            impactos_rio.append(item_impacto)
+            if v3_num is not None and v4_num is not None:
+                item_impacto = classificar_impacto_rio(
+                    regra,
+                    nome_param,
+                    v3_num,
+                    v4_num,
+                    unidade,
+                    v2=p2_valores_map.get(nome_param)
+                )
+                item_impacto['mes'] = mes_referencia
+                impactos_rio.append(item_impacto)
 
     # 4. Cálculo de Eficiência da ETE (P1 vs P2)
-    # Filtra pares P1 e P2 para DBO5,20, DQO e SST
-    p1_map = {m['parametro']: m['valor_medido'] for m in medicoes_extraidas if m['ponto_coleta'] == 'P1'}
-    p2_map = {m['parametro']: m['valor_medido'] for m in medicoes_extraidas if m['ponto_coleta'] == 'P2'}
+    # Filtra pares P1 e P2 para DBO5,20, DQO e SST mantendo sempre a primeira ocorrencia
+    p1_map = {}
+    p2_map = {}
+    for m in medicoes_extraidas:
+        if m['ponto_coleta'] == 'P1':
+            p1_map.setdefault(m['parametro'], m['valor_medido'])
+        elif m['ponto_coleta'] == 'P2':
+            p2_map.setdefault(m['parametro'], m['valor_medido'])
 
     eficiencias_calculadas = []
     for param_carga in ['DBO5,20', 'DQO', 'Sólidos Suspensos Totais']:
@@ -1083,16 +1380,24 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
                     for m in medicoes_extraidas:
                         if m['ponto_coleta'] == 'P2' and m['parametro'] == nome_oficial:
                             reav = regra.avaliar_p2(v2, eficiencia_pct=ef_pct)
-                            if reav['status_conformidade'] == 'Não Conforme' and m['status_conformidade'] != 'Não Conforme':
-                                alertas_nao_conformidade.append({
-                                    'mes': mes_referencia,
-                                    'ponto': 'P2',
-                                    'parametro': nome_oficial,
-                                    'valor': v2,
-                                    'unidade': m['unidade'],
-                                    'norma_violada': reav['norma_violada'],
-                                    'mensagem': reav['alerta']
-                                })
+                            if reav['status_conformidade'] == 'Não Conforme':
+                                alerta_existente = next(
+                                    (a for a in alertas_nao_conformidade if a['parametro'] == nome_oficial and a['ponto'] == 'P2'),
+                                    None,
+                                )
+                                if alerta_existente:
+                                    alerta_existente['norma_violada'] = reav['norma_violada']
+                                    alerta_existente['mensagem'] = reav['alerta']
+                                else:
+                                    alertas_nao_conformidade.append({
+                                        'mes': mes_referencia,
+                                        'ponto': 'P2',
+                                        'parametro': nome_oficial,
+                                        'valor': v2,
+                                        'unidade': m['unidade'],
+                                        'norma_violada': reav['norma_violada'],
+                                        'mensagem': reav['alerta']
+                                    })
                             m['status_conformidade'] = reav['status_conformidade']
                             m['em_conformidade'] = reav['em_conformidade']
                             m['norma_violada'] = reav['norma_violada']
@@ -1180,18 +1485,20 @@ def importar_relatorio_pdf(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict:
         for ef in dados['eficiencias']
     ]
 
-    _LAUDOS_SESSAO[codigo_campanha] = LaudoSessao(
-        codigo_laudo=codigo_campanha,
-        unidade_monitorada=dados['unidade_monitorada'],
-        corpo_receptor=dados['corpo_receptor'],
-        campanha_mes=mes_referencia,
-        data_coleta=data_coleta,
-        laboratorio=dados['laboratorio'],
-        arquivo_origem=nome_arquivo,
-        observacoes="Laudo importado automaticamente via módulo de extração PDF.",
-        medicoes=medicoes_objs,
-        eficiencias=eficiencias_objs,
-    )
+    _salvar_laudos_sessao({
+        codigo_campanha: LaudoSessao(
+            codigo_laudo=codigo_campanha,
+            unidade_monitorada=str(dados['unidade_monitorada'] or 'ETE Industrial')[:150],
+            corpo_receptor=str(dados['corpo_receptor'] or 'Rio Piracicaba (Classe 2)')[:150],
+            campanha_mes=str(mes_referencia or '')[:32],
+            data_coleta=data_coleta,
+            laboratorio=str(dados['laboratorio'] or 'Laboratório Acreditado')[:150],
+            arquivo_origem=str(nome_arquivo)[:255],
+            observacoes="Laudo importado automaticamente via módulo de extração PDF.",
+            medicoes=medicoes_objs,
+            eficiencias=eficiencias_objs,
+        )
+    })
     return dados
 
 
@@ -1218,7 +1525,8 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
                 'total_conformes_p2': 0,
                 'total_nao_conformes_p2': 0,
                 'total_informativos_p2': 0,
-                'taxa_conformidade_pct': 0.0,
+                'total_sem_dados_p2': 0,
+                'taxa_conformidade_pct': None,
                 'total_alertas_rio': 0,
                 'total_atencao_rio': 0,
                 'eficiencia_media_dbo': None,
@@ -1270,6 +1578,7 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
     total_conformes_p2 = 0
     total_nao_conformes_p2 = 0
     total_informativos_p2 = 0
+    total_sem_dados_p2 = 0
     total_medicoes_p2 = 0
     total_alertas_rio = 0
     total_atencao_rio = 0
@@ -1288,27 +1597,32 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
         medicoes_p3 = [m for m in l.medicoes if m.ponto_coleta == 'P3']
         medicoes_p4 = [m for m in l.medicoes if m.ponto_coleta == 'P4']
 
-        p2_map = {m.parametro: m for m in medicoes_p2}
-        p3_map = {m.parametro: m for m in medicoes_p3}
-        p4_map = {m.parametro: m for m in medicoes_p4}
+        p2_map = _mapear_primeira_medicao(medicoes_p2)
+        p3_map = _mapear_primeira_medicao(medicoes_p3)
+        p4_map = _mapear_primeira_medicao(medicoes_p4)
 
         impactos_l = []
         for param_nome in sorted(set(p3_map.keys()).intersection(set(p4_map.keys()))):
             m3 = p3_map[param_nome]
             m4 = p4_map[param_nome]
-            v2 = p2_map[param_nome].valor_medido if param_nome in p2_map else None
+            v3 = sanitizar_float(m3.valor_medido)
+            v4 = sanitizar_float(m4.valor_medido)
+            if v3 is None or v4 is None:
+                continue
+            v2 = sanitizar_float(p2_map[param_nome].valor_medido) if param_nome in p2_map else None
             regra = LimiteLegal.buscar_por_nome(param_nome)
-            imp = classificar_impacto_rio(regra, param_nome, m3.valor_medido, m4.valor_medido, m4.unidade, v2=v2)
+            imp = classificar_impacto_rio(regra, param_nome, v3, v4, m4.unidade, v2=v2)
             impactos_l.append(imp)
         impactos_por_laudo[l.codigo_laudo] = impactos_l
 
         conf_l = sum(1 for m in medicoes_p2 if m.status_conformidade == 'Conforme')
         nconf_l = sum(1 for m in medicoes_p2 if m.status_conformidade == 'Não Conforme')
-        info_l = sum(1 for m in medicoes_p2 if m.status_conformidade not in ('Conforme', 'Não Conforme'))
+        sem_dados_l = sum(1 for m in medicoes_p2 if m.status_conformidade == 'Sem Dados')
+        info_l = sum(1 for m in medicoes_p2 if m.status_conformidade not in ('Conforme', 'Não Conforme', 'Sem Dados'))
         rio_imp_l = sum(1 for i in impactos_l if i['status_rio'] == 'Alerta de Impacto')
         rio_ate_l = sum(1 for i in impactos_l if i['status_rio'] == 'Atenção')
 
-        ef_dbo_l = next((e.eficiencia_percentual for e in l.eficiencias if e.parametro == 'DBO5,20'), None)
+        ef_dbo_l = next((sanitizar_float(e.eficiencia_percentual) for e in l.eficiencias if e.parametro == 'DBO5,20'), None)
 
         resumo_campanhas.append({
             'codigo_laudo': l.codigo_laudo,
@@ -1330,6 +1644,7 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
         total_conformes_p2 += conf_l
         total_nao_conformes_p2 += nconf_l
         total_informativos_p2 += info_l
+        total_sem_dados_p2 += sem_dados_l
         total_alertas_rio += rio_imp_l
         total_atencao_rio += rio_ate_l
 
@@ -1356,14 +1671,16 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
                 })
 
         for e in l.eficiencias:
-            if e.parametro in ef_valores_por_param and e.eficiencia_percentual is not None:
-                ef_valores_por_param[e.parametro].append(e.eficiencia_percentual)
+            ef_val = sanitizar_float(e.eficiencia_percentual)
+            if e.parametro in ef_valores_por_param and ef_val is not None:
+                ef_valores_por_param[e.parametro].append(ef_val)
 
     total_avaliadas_p2 = total_conformes_p2 + total_nao_conformes_p2
-    taxa_conformidade_pct = round((total_conformes_p2 / total_avaliadas_p2) * 100.0, 1) if total_avaliadas_p2 > 0 else 0.0
+    taxa_conformidade_pct = round((total_conformes_p2 / total_avaliadas_p2) * 100.0, 1) if total_avaliadas_p2 > 0 else None
 
     def media_arredondada(valores):
-        return round(sum(valores) / len(valores), 1) if valores else None
+        validos = [v for v in valores if sanitizar_float(v) is not None]
+        return round(sum(validos) / len(validos), 1) if validos else None
 
     # As series temporais mantem todas as campanhas em ordem cronologica, mesmo com filtro ativo
     meses_labels = [l.campanha_mes for l in todos_laudos]
@@ -1373,7 +1690,7 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
         'Sólidos Suspensos Totais': [],
     }
     for l in todos_laudos:
-        ef_map = {e.parametro: e.eficiencia_percentual for e in l.eficiencias}
+        ef_map = {e.parametro: sanitizar_float(e.eficiencia_percentual) for e in l.eficiencias}
         for p_nome in series_eficiencia:
             series_eficiencia[p_nome].append(ef_map.get(p_nome))
 
@@ -1399,8 +1716,8 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
     for l in todos_laudos:
         m_p2 = next((m for m in l.medicoes if m.ponto_coleta == 'P2' and m.parametro == parametro_selecionado), None)
         m_p1 = next((m for m in l.medicoes if m.ponto_coleta == 'P1' and m.parametro == parametro_selecionado), None)
-        valores_p2_serie.append(m_p2.valor_medido if m_p2 else None)
-        valores_p1_serie.append(m_p1.valor_medido if m_p1 else None)
+        valores_p2_serie.append(sanitizar_float(m_p2.valor_medido) if m_p2 else None)
+        valores_p1_serie.append(sanitizar_float(m_p1.valor_medido) if m_p1 else None)
         if not unidade_param_sel and m_p2:
             unidade_param_sel = m_p2.unidade
 
@@ -1421,6 +1738,12 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
     investigacoes_rio.reverse()
     resumo_campanhas.reverse()
 
+    rosca_labels = ['Conforme', 'Não Conforme', 'Informativo']
+    rosca_valores = [total_conformes_p2, total_nao_conformes_p2, total_informativos_p2]
+    if total_sem_dados_p2 > 0:
+        rosca_labels.append('Sem Dados')
+        rosca_valores.append(total_sem_dados_p2)
+
     return {
         'possui_dados': True,
         'filtros': {
@@ -1436,6 +1759,7 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
             'total_conformes_p2': total_conformes_p2,
             'total_nao_conformes_p2': total_nao_conformes_p2,
             'total_informativos_p2': total_informativos_p2,
+            'total_sem_dados_p2': total_sem_dados_p2,
             'taxa_conformidade_pct': taxa_conformidade_pct,
             'total_alertas_rio': total_alertas_rio,
             'total_atencao_rio': total_atencao_rio,
@@ -1445,8 +1769,8 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
         },
         'graficos': {
             'conformidade_rosca': {
-                'labels': ['Conforme', 'Não Conforme', 'Informativo'],
-                'valores': [total_conformes_p2, total_nao_conformes_p2, total_informativos_p2],
+                'labels': rosca_labels,
+                'valores': rosca_valores,
             },
             'eficiencia_temporal': {
                 'meses': meses_labels,
@@ -1467,12 +1791,20 @@ def obter_dados_dashboard(campanha_filtro: str = None, parametro_filtro: str = N
 
 
 def excluir_laudo(codigo_laudo: str) -> bool:
-    """Remove uma campanha especifica da sessao em memoria."""
-    return _LAUDOS_SESSAO.pop(codigo_laudo, None) is not None
+    """Remove uma campanha especifica da sessao atual em memoria."""
+    with _SESSOES_LOCK:
+        store = _obter_armazenamento_sessao(criar=False)
+        if not store:
+            return False
+        return store.pop(codigo_laudo, None) is not None
 
 
 def limpar_todos_laudos() -> int:
-    """Limpa todas as campanhas carregadas na sessao em memoria."""
-    total = len(_LAUDOS_SESSAO)
-    _LAUDOS_SESSAO.clear()
-    return total
+    """Limpa todas as campanhas carregadas na sessao atual em memoria."""
+    with _SESSOES_LOCK:
+        store = _obter_armazenamento_sessao(criar=False)
+        if not store:
+            return 0
+        total = len(store)
+        store.clear()
+        return total

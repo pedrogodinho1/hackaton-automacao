@@ -52,7 +52,7 @@
             </div>
 
             <form action="{{ url_for('limpar_laudos_rota') }}" method="POST" class="w-full sm:w-auto"
-                  onsubmit="return confirm('Deseja limpar todas as campanhas carregadas na sessão atual?');">
+                  data-confirm="Deseja limpar todas as campanhas carregadas na sessão atual?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="origem" value="dashboard">
                 <button type="submit" class="btn-industrial-danger w-full sm:w-auto justify-center">
@@ -96,7 +96,7 @@
             <span id="dashboard-api-erro-texto">Não foi possível atualizar os indicadores do dashboard.</span>
         </div>
         <button type="button"
-                onclick="document.getElementById('dashboard-api-erro').classList.add('hidden')"
+                data-dismiss-target="dashboard-api-erro"
                 aria-label="Fechar alerta"
                 class="p-1 rounded text-rose-500 hover:text-rose-800 hover:bg-rose-100 transition-colors shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -110,12 +110,12 @@
         <div class="telemetry-card">
             <span class="telemetry-label">Conformidade Legal</span>
             <div id="kpi-taxa-conformidade" class="telemetry-value text-[#971E84]">
-                {{ "%.1f"|format(dados.kpis.taxa_conformidade_pct) }}%
+                {% if dados.kpis.taxa_conformidade_pct is not none %}{{ "%.1f"|format(dados.kpis.taxa_conformidade_pct) }}%{% else %}--{% endif %}
             </div>
             <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2.5 overflow-hidden">
                 <div id="kpi-barra-conformidade"
                      class="bg-[#971E84] h-1.5 rounded-full transition-all duration-300"
-                     data-width="{{ dados.kpis.taxa_conformidade_pct }}"></div>
+                     data-width="{{ dados.kpis.taxa_conformidade_pct if dados.kpis.taxa_conformidade_pct is not none else 0 }}"></div>
             </div>
             <div id="kpi-sub-conformidade" class="telemetry-subtext">
                 {{ dados.kpis.total_conformes_p2 }} de {{ dados.kpis.total_avaliadas_p2 }} parâmetros em P2
@@ -199,15 +199,19 @@
             <div class="station-card-header">
                 <div>
                     <h2 id="titulo-param-chart" class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">
-                        Série Histórica em P2: {{ dados.graficos.evolucao_parametro_p2.parametro }}
+                        Série Histórica em P2: {{ dados.graficos.evolucao_parametro_p2.parametro or 'Nenhum parâmetro em P2' }}
                     </h2>
                     <p id="subtitulo-param-chart" class="text-[11px] font-mono text-slate-500 mt-0.5">
                         Norma aplicada: {{ dados.graficos.evolucao_parametro_p2.norma_restritiva }}
                     </p>
                 </div>
                 <span id="badge-limite-param" class="file-spec-tag">
-                    {% if dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
+                    {% if dados.graficos.evolucao_parametro_p2.limite_min_restritivo is not none and dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
+                        Faixa {{ dados.graficos.evolucao_parametro_p2.limite_min_restritivo }} a {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
+                    {% elif dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
                         Teto &lt;= {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
+                    {% elif dados.graficos.evolucao_parametro_p2.limite_min_restritivo is not none %}
+                        Mínimo &gt;= {{ dados.graficos.evolucao_parametro_p2.limite_min_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
                     {% else %}
                         Monitoramento
                     {% endif %}
@@ -332,7 +336,7 @@
                        data-table-filter="tabela-dashboard-campanhas"
                        placeholder="Filtrar campanha..."
                        class="table-search-input">
-                <span id="badge-count-campanhas" class="stamp-badge stamp-info">{{ dados.resumo_campanhas|length }} campanhas</span>
+                <span id="badge-count-campanhas" class="stamp-badge stamp-info">{{ dados.resumo_campanhas|length }} {{ 'campanha' if dados.resumo_campanhas|length == 1 else 'campanhas' }}</span>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -387,7 +391,7 @@
                             </a>
                             <span class="text-slate-300">|</span>
                             <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=c.codigo_laudo) }}" method="POST" class="inline"
-                                  onsubmit="return confirm('Deseja excluir a campanha {{ c.codigo_laudo }}?');">
+                                  data-confirm="Deseja excluir a campanha {{ c.codigo_laudo }}?">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="origem" value="dashboard">
                                 <button type="submit" class="text-rose-600 hover:text-rose-800 font-semibold text-xs transition-colors">
@@ -434,14 +438,24 @@
          */
         function atualizarKpisEListas(dados) {
             const k = dados.kpis;
-            document.getElementById('kpi-taxa-conformidade').textContent = `${k.taxa_conformidade_pct.toFixed(1)}%`;
-            document.getElementById('kpi-barra-conformidade').style.width = `${k.taxa_conformidade_pct}%`;
+            document.getElementById('kpi-taxa-conformidade').textContent = k.taxa_conformidade_pct !== null ? `${k.taxa_conformidade_pct.toFixed(1)}%` : '--';
+            document.getElementById('kpi-barra-conformidade').style.width = `${k.taxa_conformidade_pct !== null ? k.taxa_conformidade_pct : 0}%`;
             document.getElementById('kpi-sub-conformidade').textContent = `${k.total_conformes_p2} de ${k.total_avaliadas_p2} parâmetros em P2`;
 
+            const cardNconf = document.getElementById('card-kpi-nconf');
+            if (cardNconf) {
+                cardNconf.classList.toggle('border-rose-300', k.total_nao_conformes_p2 > 0);
+                cardNconf.classList.toggle('bg-rose-50/20', k.total_nao_conformes_p2 > 0);
+            }
             const elNconf = document.getElementById('kpi-nao-conformes');
             elNconf.textContent = k.total_nao_conformes_p2;
             elNconf.className = `telemetry-value ${k.total_nao_conformes_p2 > 0 ? 'text-rose-600' : 'text-emerald-600'}`;
 
+            const cardRio = document.getElementById('card-kpi-rio');
+            if (cardRio) {
+                cardRio.classList.toggle('border-amber-300', k.total_alertas_rio > 0);
+                cardRio.classList.toggle('bg-amber-50/20', k.total_alertas_rio > 0);
+            }
             const elRio = document.getElementById('kpi-alertas-rio');
             elRio.textContent = k.total_alertas_rio;
             elRio.className = `telemetry-value ${k.total_alertas_rio > 0 ? 'text-rose-600' : (k.total_atencao_rio > 0 ? 'text-amber-600' : 'text-emerald-600')}`;
@@ -522,8 +536,8 @@
         }
 
         /**
-         * Cria ou recria os quatro graficos do dashboard em Chart.js
-         * (conformidade em P2, eficiencia da ETE, comparativo do rio e serie historica).
+         * Cria ou recria os cinco graficos do dashboard em Chart.js
+         * (conformidade em P2, eficiencia da ETE, comparativo do rio, serie historica e ranking).
          */
         function renderizarGraficos(dados) {
             const g = dados.graficos;
@@ -538,7 +552,7 @@
                     labels: g.conformidade_rosca.labels,
                     datasets: [{
                         data: g.conformidade_rosca.valores,
-                        backgroundColor: ['#047857', '#b91c1c', '#94a3b8'],
+                        backgroundColor: ['#047857', '#b91c1c', '#94a3b8', '#f59e0b'].slice(0, g.conformidade_rosca.labels.length),
                         borderColor: '#ffffff',
                         borderWidth: 2,
                         hoverOffset: 4
@@ -614,8 +628,8 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            min: 0,
-                            max: 100,
+                            suggestedMin: 0,
+                            suggestedMax: 100,
                             ticks: {
                                 font: { family: fonteMono, size: 11 },
                                 callback: val => val + '%'
@@ -702,13 +716,15 @@
             });
 
             const ep = g.evolucao_parametro_p2;
-            document.getElementById('titulo-param-chart').textContent = `Série Histórica em P2: ${ep.parametro}`;
+            document.getElementById('titulo-param-chart').textContent = `Série Histórica em P2: ${ep.parametro || 'Nenhum parâmetro em P2'}`;
             document.getElementById('subtitulo-param-chart').textContent = `Norma aplicada: ${ep.norma_restritiva}`;
             const badgeLim = document.getElementById('badge-limite-param');
             if (ep.limite_max_restritivo !== null && ep.limite_min_restritivo !== null) {
                 badgeLim.textContent = `Faixa ${ep.limite_min_restritivo} a ${ep.limite_max_restritivo} ${ep.unidade}`;
             } else if (ep.limite_max_restritivo !== null) {
                 badgeLim.textContent = `Teto <= ${ep.limite_max_restritivo} ${ep.unidade}`;
+            } else if (ep.limite_min_restritivo !== null) {
+                badgeLim.textContent = `Mínimo >= ${ep.limite_min_restritivo} ${ep.unidade}`;
             } else {
                 badgeLim.textContent = 'Monitoramento';
             }
@@ -838,9 +854,13 @@
             }
         }
 
+        let dashboardAbortCtrl = null;
+        let dashboardReqSeq = 0;
+
         /**
          * Consulta a rota JSON do dashboard com os filtros selecionados
          * e atualiza indicadores, listas e graficos sem recarregar a pagina.
+         * Cancela requisicoes anteriores em voo para evitar condicao de corrida.
          */
         async function recarregarDashboard() {
             const campanha = document.getElementById('filtro-campanha').value;
@@ -849,26 +869,40 @@
             const alertaErro = document.getElementById('dashboard-api-erro');
             const textoErro = document.getElementById('dashboard-api-erro-texto');
             const inicio = Date.now();
+
+            if (dashboardAbortCtrl) {
+                dashboardAbortCtrl.abort();
+            }
+            dashboardAbortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const seqAtual = ++dashboardReqSeq;
+
             if (alertaErro) alertaErro.classList.add('hidden');
             if (window.EteLoader) window.EteLoader.show();
             try {
-                const resp = await fetch(`${urlApiDashboard}?${params.toString()}`);
+                const resp = await fetch(`${urlApiDashboard}?${params.toString()}`, {
+                    signal: dashboardAbortCtrl ? dashboardAbortCtrl.signal : undefined
+                });
                 if (!resp.ok) {
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 const novosDados = await resp.json();
+                if (seqAtual !== dashboardReqSeq) return;
                 atualizarKpisEListas(novosDados);
                 renderizarGraficos(novosDados);
             } catch (err) {
+                if (err && err.name === 'AbortError') return;
+                if (seqAtual !== dashboardReqSeq) return;
                 console.error('Erro ao atualizar dashboard:', err);
                 if (textoErro) {
                     textoErro.textContent = 'Não foi possível atualizar os indicadores do dashboard. Verifique se o servidor está ativo e tente novamente.';
                 }
                 if (alertaErro) alertaErro.classList.remove('hidden');
             } finally {
-                if (window.EteLoader) {
+                if (seqAtual === dashboardReqSeq && window.EteLoader) {
                     const restante = Math.max(0, 180 - (Date.now() - inicio));
-                    setTimeout(() => window.EteLoader.hide(true), restante);
+                    setTimeout(() => {
+                        if (seqAtual === dashboardReqSeq) window.EteLoader.hide(true);
+                    }, restante);
                 }
             }
         }

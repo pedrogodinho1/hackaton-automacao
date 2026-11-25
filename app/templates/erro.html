@@ -7,7 +7,7 @@
     <div class="station-card max-w-xl w-full">
         <div class="station-card-header">
             <div class="flex items-center space-x-2">
-                <span class="stamp-badge {% if codigo == 404 %}stamp-atencao{% else %}stamp-violacao{% endif %}">
+                <span class="stamp-badge {% if codigo in (404, 405) %}stamp-atencao{% else %}stamp-violacao{% endif %}">
                     ERRO {{ codigo }}
                 </span>
                 <span class="text-xs font-mono text-slate-500">Diagnóstico de Rota</span>

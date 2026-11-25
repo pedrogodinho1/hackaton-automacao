@@ -241,7 +241,9 @@
                 <td>{{ "%.1f"|format(ef.saida_p2) }} {{ ef.unidade }}</td>
                 <td><strong>{{ "%.1f"|format(ef.eficiencia_percentual) }}%</strong></td>
                 <td class="text-right">
-                    {% if 'Conforme' in ef.avaliacao %}
+                    {% if 'Não Conforme' in ef.avaliacao %}
+                        <span class="badge-nao-conforme">{{ ef.avaliacao }}</span>
+                    {% elif 'Conforme' in ef.avaliacao %}
                         <span class="badge-conforme">{{ ef.avaliacao }}</span>
                     {% else %}
                         <span class="badge-info">{{ ef.avaliacao }}</span>
@@ -315,13 +317,15 @@
             {% for m in medicoes_p2 %}
             <tr {% if m.status_conformidade == 'Não Conforme' %}class="row-violacao"{% endif %}>
                 <td><strong>{{ m.parametro }}</strong></td>
-                <td>{{ m.valor_texto or m.valor_medido }}</td>
+                <td>{{ m.valor_texto if m.valor_texto else (m.valor_medido if m.valor_medido is not none else 'Sem Dados') }}</td>
                 <td>{{ m.unidade }}</td>
                 <td class="text-right">
                     {% if m.status_conformidade == 'Conforme' %}
                         <span class="badge-conforme">Conforme</span>
                     {% elif m.status_conformidade == 'Não Conforme' %}
                         <span class="badge-nao-conforme">NÃO CONFORME</span>
+                    {% elif m.status_conformidade == 'Sem Dados' %}
+                        <span style="color: #b45309; font-weight: bold;">Sem Dados</span>
                     {% else %}
                         <span class="badge-info">Informativo</span>
                     {% endif %}

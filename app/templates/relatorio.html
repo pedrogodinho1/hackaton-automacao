@@ -25,7 +25,7 @@
                         <span>Dashboard</span>
                     </a>
 
-                    <a href="{{ url_for('index') }}" class="btn-industrial-secondary">
+                    <a href="{{ url_for('importar_pdf') if (resultado and resultado.formato == 'pdf') else url_for('index') }}" class="btn-industrial-secondary">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M6 8L2 12L6 16"/>
                             <path d="M2 12H22"/>
@@ -48,7 +48,7 @@
                         <span>Baixar Laudo PDF</span>
                     </a>
                     <form action="{{ url_for('excluir_laudo_rota', codigo_laudo=laudo.codigo_laudo) }}" method="POST" class="inline"
-                          onsubmit="return confirm('Deseja excluir o laudo {{ laudo.codigo_laudo }} da sessão atual?');">
+                          data-confirm="Deseja excluir o laudo {{ laudo.codigo_laudo }} da sessão atual?">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="origem" value="dashboard">
                         <button type="submit" class="btn-industrial-danger">
@@ -110,7 +110,7 @@
                 <span class="stamp-badge stamp-violacao">ALERTA CRÍTICO</span>
                 <span class="text-xs font-bold text-rose-950 font-mono">Não Conformidades Detectadas no Efluente Tratado (P2)</span>
             </div>
-            <span class="text-xs font-mono text-rose-700 font-semibold">{{ resultado.alertas|length }} violações</span>
+            <span class="text-xs font-mono text-rose-700 font-semibold">{{ resultado.alertas|length }} {{ 'violação' if resultado.alertas|length == 1 else 'violações' }}</span>
         </div>
         <div class="p-5 space-y-3">
             {% for a in resultado.alertas %}
@@ -159,9 +159,9 @@
                     <tr>
                         <td class="font-bold text-slate-900">{{ ef.mes }}</td>
                         <td class="font-sans font-semibold text-slate-800">{{ ef.parametro }}</td>
-                        <td class="text-slate-600">{{ ef.entrada_p1 }} {{ ef.unidade }}</td>
-                        <td class="text-slate-600">{{ ef.saida_p2 }} {{ ef.unidade }}</td>
-                        <td class="text-sm font-bold text-[#971E84]">{{ ef.eficiencia_pct }}%</td>
+                        <td class="text-slate-600">{{ "%.1f"|format(ef.entrada_p1) }} {{ ef.unidade }}</td>
+                        <td class="text-slate-600">{{ "%.1f"|format(ef.saida_p2) }} {{ ef.unidade }}</td>
+                        <td class="text-sm font-bold text-[#971E84]">{{ "%.1f"|format(ef.eficiencia_pct) }}%</td>
                         <td class="text-right">
                             {% if 'Não Conforme' in ef.avaliacao %}
                                 <span class="stamp-badge stamp-violacao">{{ ef.avaliacao }}</span>
@@ -422,7 +422,7 @@
                     {% for m in medicoes_p2 %}
                     <tr data-searchable="true">
                         <td class="font-sans font-medium text-slate-900">{{ m.parametro }}</td>
-                        <td class="font-bold text-slate-900">{{ m.valor_texto or m.valor_medido }}</td>
+                        <td class="font-bold text-slate-900">{{ m.valor_texto if m.valor_texto else (m.valor_medido if m.valor_medido is not none else 'Sem Dados') }}</td>
                         <td class="text-slate-500">{{ m.unidade }}</td>
                         <td class="text-slate-500 text-[11px]">{{ m.limite_ref.norma_mais_restritiva if m.limite_ref else 'Monitoramento' }}</td>
                         <td class="text-right">
@@ -430,6 +430,8 @@
                                 <span class="stamp-badge stamp-conforme">Conforme</span>
                             {% elif m.status_conformidade == 'Não Conforme' %}
                                 <span class="stamp-badge stamp-violacao">Não Conforme</span>
+                            {% elif m.status_conformidade == 'Sem Dados' %}
+                                <span class="stamp-badge stamp-atencao">Sem Dados</span>
                             {% else %}
                                 <span class="stamp-badge stamp-info">Informativo</span>
                             {% endif %}

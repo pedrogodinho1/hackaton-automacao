@@ -23,18 +23,18 @@ O monitoramento ambiental acompanha quatro pontos fixos de coleta ao longo do ci
 
 O banco de referência local (`instance/monitoramento.db`) mantém cadastrados os 4 pontos de coleta, 3 normas ambientais e 22 parâmetros regulamentados com suporte a sinônimos e símbolos químicos:
 
-- **Norma mais restritiva em P2:** cada medição no efluente tratado é confrontada simultaneamente com a **Resolução CONAMA 430/2011 (Art. 16)** e o **Decreto Estadual SP 8.468/1976 (Art. 18)**. Quando as duas normas divergem, prevalece automaticamente o limite mais rigoroso (por exemplo, Chumbo Total adota `0,1 mg/L` do Decreto SP em vez de `0,5 mg/L` do CONAMA 430).
+- **Norma mais restritiva em P2:** cada medição no efluente tratado é confrontada simultaneamente com a **Resolução CONAMA 430/2011 (Art. 16)** e o **Decreto Estadual SP 8.468/1976 (Art. 18)**. Quando as duas normas divergem, prevalece automaticamente o limite mais rigoroso (por exemplo, Cianeto Total adota `0,20 mg/L` do Decreto SP em vez de `1,00 mg/L` do CONAMA 430).
 - **Eficiência de remoção da ETE (P1 vs P2):** calculada pela fórmula `((P1 - P2) / P1) * 100` para parâmetros de carga (`DBO5,20`, `DQO` e `SST`), com verificação legal da meta de remoção mínima de `DBO5,20` (`>= 60%` pela CONAMA 430/2011) e concentração máxima (`<= 60,0 mg/L` pelo Decreto SP 8.468/1976).
 - **Impacto no Rio Piracicaba (P3 vs P4):** confronta P4 com os limites máximos e mínimos da **Resolução CONAMA 357/2005 (Água Doce Classe 2)**, monitora variação térmica `>= 3,0 °C` na zona de mistura e dispara avisos de atenção quando há elevação igual ou superior a `20%` entre montante e jusante.
 
 ## Principais funcionalidades
 
-- **Importação de planilhas Excel (`.xlsx` e `.xls`):** leitura via `pandas` e `openpyxl`, reconhecimento flexível de colunas e sinônimos, tratamento de valores abaixo do limite de quantificação (`< LQ`) e suporte a planilhas com múltiplas campanhas mensais.
+- **Importação de planilhas Excel (`.xlsx`):** leitura via `pandas` e `openpyxl`, reconhecimento flexível de colunas e sinônimos, suporte a números no formato brasileiro (`1.200,50`) e limites de quantificação (`< LQ`), datas no padrão `DD/MM/YYYY` e planilhas com múltiplas campanhas mensais.
 - **Leitor automático de laudos PDF:** extração de texto via `pypdf` compatível tanto com laudos laboratoriais (independente do número fixo de páginas) quanto com relatórios técnicos gerados pelo próprio sistema, com aviso claro para PDFs escaneados sem texto selecionável.
 - **Dashboard Ambiental interativo:** painel consolidado com 4 cartões de KPIs, filtros dinâmicos por campanha e por parâmetro via API JSON (`/api/dashboard`), 5 gráficos em `Chart.js` (conformidade em P2, eficiência histórica da ETE, comparativo P3 vs P4 no Rio Piracicaba, série histórica do parâmetro selecionado e ranking de não conformidades), painéis de alertas e tabela consolidada com busca rápida.
 - **Parecer técnico e exportação em PDF:** visualização web detalhada por campanha (`/relatorio/<codigo_laudo>`) e geração de laudo técnico oficial em PDF diretamente em memória via `xhtml2pdf`, sem gravar arquivos temporários no disco.
-- **Sessão em memória sem persistência indesejada:** as campanhas importadas ficam armazenadas apenas na memória da sessão ativa (permitindo comparar vários arquivos na mesma sessão e começando zerado ao reiniciar o servidor), enquanto o SQLite mantém apenas as tabelas de referência legal.
-- **Segurança e robustez:** proteção CSRF em todos os formulários `POST`, validação real do tipo de arquivo por assinatura (Magic Bytes), limite de upload de 16 MB com tratamento HTTP 413, cabeçalhos HTTP de segurança (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`), cookies de sessão `HttpOnly`/`SameSite=Lax`, páginas personalizadas de erro 404/500 e interface responsiva para desktop, tablet e celular.
+- **Sessão em memória isolada:** as campanhas importadas ficam armazenadas apenas na memória e isoladas por sessão de navegador (com proteção concorrente e limite de memória), enquanto o SQLite mantém apenas as tabelas de referência legal e é inicializado automaticamente na primeira execução.
+- **Segurança e robustez:** proteção CSRF em todos os formulários `POST`, validação real do tipo de arquivo por assinatura (Magic Bytes), limite de upload de 16 MB com tratamento HTTP 413, cabeçalhos HTTP de segurança (`Content-Security-Policy`, `Cache-Control: no-store`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`), cookies de sessão `HttpOnly`/`SameSite=Lax`, páginas personalizadas de erro 404/500 e interface responsiva para desktop, tablet e celular.
 
 ## Tecnologias utilizadas
 
@@ -49,9 +49,10 @@ O banco de referência local (`instance/monitoramento.db`) mantém cadastrados o
 HACKATON/
 ├── app/
 │   ├── __init__.py            # Inicializacao do Flask, dotenv, limite de upload e SQLAlchemy
-│   ├── models.py              # Modelos relacionais (pontos, legislacoes e limites legais)
-│   ├── routes.py              # Rotas web, API JSON, protecao CSRF, magic bytes e handlers de erro
-│   ├── services.py            # Regras ambientais, sessao em memoria, parsers Excel/PDF e gerador PDF
+│   ├── models.py              # Modelos relacionais de referencia (pontos, legislacoes e limites legais)
+│   ├── routes.py              # Rotas web, API JSON, protecao CSRF, CSP, magic bytes e handlers de erro
+│   ├── seed.py                # Carga inicial e auto-inicializacao das tabelas de referencia
+│   ├── services.py            # Regras ambientais, sessao isolada em memoria, parsers Excel/PDF e gerador PDF
 │   ├── static/
 │   │   ├── css/style.css      # Design system, grade blueprint, spinner, scroll e regras responsivas
 │   │   ├── images/icon.svg    # Icone principal da aplicacao e favicon

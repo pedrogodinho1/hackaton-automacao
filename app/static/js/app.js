@@ -1,10 +1,25 @@
 document.addEventListener('DOMContentLoaded', function () {
+    initConfirmForms();
     initPageLoader();
     initFlashAlerts();
     initDropzone('arquivo-excel', 'dropzone-excel', 'file-card-excel', 'file-name-excel', 'file-size-excel', 'btn-clear-excel');
     initDropzone('arquivo-pdf', 'dropzone-pdf', 'file-card-pdf', 'file-name-pdf', 'file-size-pdf', 'btn-clear-pdf');
     initTableFilters();
     initUploadSubmitFeedback();
+
+    /**
+     * Exibe dialogo de confirmacao de forma segura via atributo data-confirm,
+     * evitando interpolacao de dados do servidor em handlers inline (XSS).
+     */
+    function initConfirmForms() {
+        document.addEventListener('submit', function (e) {
+            const form = e.target;
+            if (!form || !form.dataset || !form.dataset.confirm) return;
+            if (!window.confirm(form.dataset.confirm)) {
+                e.preventDefault();
+            }
+        });
+    }
 
     /**
      * Controla o overlay de carregamento durante navegacao entre paginas,
@@ -191,7 +206,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     /**
-     * Permite fechar os alertas flash da pagina com transicao suave ao clicar no botao X.
+     * Permite fechar alertas flash (com remocao suave) e alertas inline via data-dismiss-target.
      */
     function initFlashAlerts() {
         document.querySelectorAll('[data-flash-dismiss]').forEach(function (btn) {
@@ -205,21 +220,46 @@ document.addEventListener('DOMContentLoaded', function () {
                 }, 180);
             });
         });
+
+        document.querySelectorAll('[data-dismiss-target]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const alvo = document.getElementById(btn.dataset.dismissTarget);
+                if (alvo) alvo.classList.add('hidden');
+            });
+        });
     }
 
     /**
      * Desabilita o botao de envio e exibe indicador de processamento para evitar cliques duplicados.
+     * Reabilita automaticamente ao voltar pelo historico do navegador (bfcache).
      */
     function initUploadSubmitFeedback() {
-        document.querySelectorAll('form[data-upload-form]').forEach(function (form) {
-            form.addEventListener('submit', function () {
-                const btn = form.querySelector('button[type="submit"]');
-                if (!btn) return;
+        const forms = document.querySelectorAll('form[data-upload-form]');
+        forms.forEach(function (form) {
+            const btn = form.querySelector('button[type="submit"]');
+            const label = btn ? btn.querySelector('[data-submit-label]') : null;
+            if (label && !label.dataset.originalLabel) {
+                label.dataset.originalLabel = label.textContent;
+            }
+            form.addEventListener('submit', function (e) {
+                if (e.defaultPrevented || !btn) return;
                 btn.disabled = true;
                 btn.classList.add('opacity-70', 'cursor-not-allowed');
-                const label = btn.querySelector('[data-submit-label]');
                 if (label) {
                     label.textContent = form.dataset.loadingText || 'Processando...';
+                }
+            });
+        });
+
+        window.addEventListener('pageshow', function () {
+            forms.forEach(function (form) {
+                const btn = form.querySelector('button[type="submit"]');
+                if (!btn) return;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+                const label = btn.querySelector('[data-submit-label]');
+                if (label && label.dataset.originalLabel) {
+                    label.textContent = label.dataset.originalLabel;
                 }
             });
         });

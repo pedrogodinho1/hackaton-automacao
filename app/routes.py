@@ -1,7 +1,8 @@
 import hmac
 import re
 import secrets
-from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, make_response, session
+import zipfile
+from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from werkzeug.exceptions import HTTPException
 from app import app
 from app.services import (
@@ -25,17 +26,33 @@ def gerar_csrf_token() -> str:
     return token
 
 
+_MAX_XLSX_DESCOMPRIMIDO_BYTES = 50 * 1024 * 1024
+_MAX_XLSX_ENTRADAS_ZIP = 500
+
+
 def validar_assinatura_arquivo(arquivo, tipo: str) -> bool:
-    """Confere os magic bytes iniciais para garantir que o conteudo corresponde ao tipo esperado."""
+    """Confere magic bytes e estrutura interna (.xlsx seguro contra ZIP falso e zip-bomb)."""
     cabecalho = arquivo.stream.read(8)
     arquivo.stream.seek(0)
     if tipo == 'pdf':
         return cabecalho.startswith(b'%PDF-')
     if tipo == 'excel':
-        return (
-            cabecalho.startswith(b'PK\x03\x04')
-            or cabecalho.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1')
-        )
+        if not cabecalho.startswith(b'PK\x03\x04'):
+            return False
+        try:
+            with zipfile.ZipFile(arquivo.stream, 'r') as zf:
+                infos = zf.infolist()
+                if not infos or len(infos) > _MAX_XLSX_ENTRADAS_ZIP:
+                    return False
+                tamanho_total = sum(info.file_size for info in infos)
+                if tamanho_total > _MAX_XLSX_DESCOMPRIMIDO_BYTES:
+                    return False
+                nomes = set(zf.namelist())
+                return '[Content_Types].xml' in nomes and 'xl/workbook.xml' in nomes
+        except (zipfile.BadZipFile, OSError, ValueError):
+            return False
+        finally:
+            arquivo.stream.seek(0)
     return False
 
 
@@ -67,11 +84,26 @@ def validar_csrf():
 
 @app.after_request
 def aplicar_cabecalhos_seguranca(response):
-    """Adiciona cabecalhos HTTP padrao contra MIME sniffing e clickjacking."""
+    """Adiciona cabecalhos HTTP de seguranca (CSP, clickjacking, MIME sniffing e controle de cache)."""
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'DENY')
     response.headers.setdefault('Referrer-Policy', 'same-origin')
     response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    response.headers.setdefault(
+        'Content-Security-Policy',
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    )
+    if not request.path.startswith('/static/'):
+        response.headers.setdefault('Cache-Control', 'no-store')
     return response
 
 
@@ -86,7 +118,7 @@ def index():
 def importar():
     """Valida a planilha Excel enviada, executa a analise ambiental e renderiza o parecer."""
     if 'arquivo' not in request.files:
-        flash("Nenhum arquivo enviado. Selecione uma planilha Excel (.xlsx ou .xls).", "error")
+        flash("Nenhum arquivo enviado. Selecione uma planilha Excel (.xlsx).", "error")
         return redirect(url_for('index'))
 
     arquivo = request.files['arquivo']
@@ -94,12 +126,17 @@ def importar():
         flash("Nenhum arquivo selecionado.", "error")
         return redirect(url_for('index'))
 
-    if not arquivo.filename.lower().endswith(('.xlsx', '.xls')):
-        flash("Formato invalido. Envie uma planilha Excel (.xlsx ou .xls).", "error")
+    nome_lower = arquivo.filename.lower()
+    if nome_lower.endswith('.xls'):
+        flash("Formato legado .xls não é suportado. Salve a planilha como .xlsx e tente novamente.", "error")
+        return redirect(url_for('index'))
+
+    if not nome_lower.endswith('.xlsx'):
+        flash("Formato inválido. Envie uma planilha Excel no formato .xlsx.", "error")
         return redirect(url_for('index'))
 
     if not validar_assinatura_arquivo(arquivo, 'excel'):
-        flash("O conteúdo do arquivo não corresponde a uma planilha Excel válida (.xlsx ou .xls).", "error")
+        flash("O conteúdo do arquivo não corresponde a uma planilha Excel válida (.xlsx).", "error")
         return redirect(url_for('index'))
 
     try:
@@ -156,9 +193,7 @@ def dashboard():
     campanha = request.args.get('campanha', 'todas')
     parametro = request.args.get('parametro', '')
     dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
-    resp = make_response(render_template('dashboard.html', dados=dados))
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp
+    return render_template('dashboard.html', dados=dados)
 
 
 @app.route('/api/dashboard')
@@ -167,19 +202,10 @@ def api_dashboard():
     campanha = request.args.get('campanha', 'todas')
     parametro = request.args.get('parametro', '')
     dados = obter_dados_dashboard(campanha_filtro=campanha, parametro_filtro=parametro)
-    resp = make_response(jsonify(dados))
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp
+    return jsonify(dados)
 
 
-@app.route('/relatorio/<codigo_laudo>')
-def ver_relatorio(codigo_laudo):
-    """Carrega os dados de uma campanha ja gravada na sessao e exibe o parecer em HTML."""
-    contexto = obter_contexto_relatorio(codigo_laudo)
-    return render_template('relatorio.html', **contexto)
-
-
-@app.route('/relatorio/<codigo_laudo>/pdf')
+@app.route('/relatorio/<path:codigo_laudo>/pdf')
 def baixar_relatorio_pdf(codigo_laudo):
     """Gera o relatorio tecnico em PDF na memoria via xhtml2pdf e entrega para download."""
     try:
@@ -204,7 +230,14 @@ def baixar_relatorio_pdf(codigo_laudo):
         return redirect(url_for('ver_relatorio', codigo_laudo=codigo_laudo))
 
 
-@app.route('/laudo/<codigo_laudo>/excluir', methods=['POST'])
+@app.route('/relatorio/<path:codigo_laudo>')
+def ver_relatorio(codigo_laudo):
+    """Carrega os dados de uma campanha ja gravada na sessao e exibe o parecer em HTML."""
+    contexto = obter_contexto_relatorio(codigo_laudo)
+    return render_template('relatorio.html', **contexto)
+
+
+@app.route('/laudo/<path:codigo_laudo>/excluir', methods=['POST'])
 def excluir_laudo_rota(codigo_laudo):
     """Exclui uma campanha especifica da sessao atual."""
     origem = request.form.get('origem', 'index')
@@ -234,7 +267,7 @@ def limpar_laudos_rota():
         if total > 0:
             flash(f"Histórico limpo: {total} campanha(s) removida(s). Pronto para novas importações.", "success")
         else:
-            flash("Não há campanhas gravadas para remover.", "success")
+            flash("Não há campanhas carregadas na sessão para remover.", "success")
     except Exception:
         app.logger.exception("Erro ao limpar historico de laudos.")
         flash("Não foi possível limpar o histórico.", "error")
@@ -269,6 +302,19 @@ def pagina_nao_encontrada(_error):
         titulo='Página ou laudo não encontrado',
         descricao='O endereço solicitado não existe ou o laudo já não está carregado na sessão atual. Se o servidor foi reiniciado ou os dados foram limpos, importe o arquivo novamente.'
     ), 404
+
+
+@app.errorhandler(405)
+def metodo_nao_permitido(_error):
+    """Exibe pagina personalizada de erro 405 ou JSON quando o metodo HTTP nao e suportado pela rota."""
+    if request.path.startswith('/api/'):
+        return jsonify({'erro': 'Método HTTP não permitido para este recurso.'}), 405
+    return render_template(
+        'erro.html',
+        codigo=405,
+        titulo='Ação não permitida por acesso direto',
+        descricao='Esta rota aceita apenas envio de formulário pela aplicação. Utilize os botões da interface ou retorne à tela inicial.'
+    ), 405
 
 
 @app.errorhandler(500)
