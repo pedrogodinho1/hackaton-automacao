@@ -372,9 +372,19 @@ def padronizar_dataframe_pandas(df: pd.DataFrame) -> pd.DataFrame:
     if 'mes_referencia' not in df.columns or df['mes_referencia'].isna().all():
         df['mes_referencia'] = mes_fallback
     else:
-        mes_series = df['mes_referencia'].where(df['mes_referencia'].notna(), None)
-        mes_limpo = mes_series.map(lambda v: str(v).strip() if v is not None else '')
-        mes_limpo = mes_limpo.replace({'': None, 'nan': None, 'None': None, 'NaT': None})
+        def _formatar_mes_ref(v):
+            if v is None or pd.isna(v):
+                return None
+            if isinstance(v, (datetime, date, pd.Timestamp)):
+                return v.strftime('%Y-%m')
+            s = str(v).strip()
+            if not s or s.lower() in ('nan', 'none', 'nat'):
+                return None
+            if re.match(r'^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$', s):
+                return s[:7]
+            return s
+
+        mes_limpo = df['mes_referencia'].map(_formatar_mes_ref)
         df['mes_referencia'] = mes_limpo.fillna(mes_fallback).astype(str).str.strip()
 
     # Resolve P1 a P4 usando tanto codigos diretos quanto sinonimos cadastrados em pontos_coleta
@@ -1199,11 +1209,32 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         ]:
             t2_tratado = re.sub(quebra, uniao, t2_tratado, flags=re.IGNORECASE)
 
-        regex_p1_p2 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)'
+        def _padronizar_unidade_pdf(unid: str) -> str:
+            u_low = unid.strip().lower()
+            mapa_u = {'mg/l': 'mg/L', 'ml/l': 'mL/L', 'u.ph': 'u.pH', 'uph': 'u.pH', '°c': '°C', 'unt': 'UNT'}
+            return mapa_u.get(u_low, unid.strip())
+
+        def _extrair_rotulo_anterior(texto: str, inicio_match: int, limite_esq: int) -> str:
+            trecho = texto[max(limite_esq, inicio_match - 120):inicio_match]
+            linhas = [l.strip() for l in trecho.splitlines() if l.strip()]
+            return linhas[-1] if linhas else ""
+
+        # Ancora a busca na unidade + valores (execucao O(n) instantanea, imune a ReDoS)
+        regex_p1_p2 = re.compile(
+            r'\s+(mg/L|u\.?pH|°C|mL/L)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)',
+            re.IGNORECASE,
+        )
         pares_efluente = []
-        for raw_param, unidade, v1_str, v2_str in re.findall(regex_p1_p2, t2_tratado):
+        pos_fim_ant = 0
+        for m in regex_p1_p2.finditer(t2_tratado):
+            raw_param = _extrair_rotulo_anterior(t2_tratado, m.start(), pos_fim_ant)
+            pos_fim_ant = m.end()
+            if not raw_param:
+                continue
+            unidade_raw, v1_str, v2_str = m.group(1), m.group(2), m.group(3)
             regra = casar_limite_legal(raw_param)
             nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
+            unidade = _padronizar_unidade_pdf(unidade_raw)
             v1_num, v1_txt = converter_valor(v1_str)
             v2_num, v2_txt = converter_valor(v2_str)
             pares_efluente.append((regra, nome_param, unidade, v1_num, v1_txt, v2_num, v2_txt))
@@ -1285,11 +1316,21 @@ def extrair_dados_pdf_laudo(origem_pdf, nome_arquivo: str = "laudo.pdf") -> dict
         ]:
             t3_tratado = re.sub(quebra, uniao, t3_tratado, flags=re.IGNORECASE)
 
-        regex_p3_p4 = r'([A-Za-zÀ-ÿ0-9\s,\-\(\)\+]+?)\s+(mg/L|u\.pH|°C|mL/L|UNT)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)\s+([\+\-]?[\d,\.]+)'
+        regex_p3_p4 = re.compile(
+            r'\s+(mg/L|u\.?pH|°C|mL/L|UNT)\s+((?:[<>]\s*)?[\d,\.]+)\s+((?:[<>]\s*)?[\d,\.]+)\s+([\+\-]?[\d,\.]+)',
+            re.IGNORECASE,
+        )
 
-        for raw_param, unidade, v3_str, v4_str, delta_str in re.findall(regex_p3_p4, t3_tratado):
+        pos_fim_rio = 0
+        for m in regex_p3_p4.finditer(t3_tratado):
+            raw_param = _extrair_rotulo_anterior(t3_tratado, m.start(), pos_fim_rio)
+            pos_fim_rio = m.end()
+            if not raw_param:
+                continue
+            unidade_raw, v3_str, v4_str = m.group(1), m.group(2), m.group(3)
             regra = casar_limite_legal(raw_param)
             nome_param = regra.parametro if regra else ' '.join(raw_param.split()).strip()
+            unidade = _padronizar_unidade_pdf(unidade_raw)
 
             v3_num, v3_txt = converter_valor(v3_str)
             v4_num, v4_txt = converter_valor(v4_str)

@@ -74,7 +74,7 @@ def validar_csrf():
         if request.path.startswith('/api/'):
             return jsonify({'erro': mensagem}), 403
         flash(mensagem, "error")
-        if request.path == '/importar-pdf':
+        if request.path == '/importar-pdf' or request.form.get('origem') == 'importar_pdf':
             return redirect(url_for('importar_pdf'))
         if request.form.get('origem') == 'dashboard':
             return redirect(url_for('dashboard'))

@@ -75,12 +75,16 @@ class PontoColeta(db.Model):
         t_norm = normalizar_texto(texto_ponto)
         if not t_norm or t_norm in ("nan", "none"):
             return None
-        match_cod = re.search(r"(?<![a-z0-9])(p[1-4])(?![a-z0-9])", t_norm)
+        match_cod = re.search(r"(?<![a-z0-9])(?:p|ponto\s*)([1-4])(?![a-z0-9])", t_norm)
         if match_cod:
-            return match_cod.group(1).upper()
+            return f"P{match_cod.group(1)}"
         mapa = mapa_sinonimos if mapa_sinonimos is not None else cls.montar_mapa_sinonimos()
         if t_norm in mapa:
             return mapa[t_norm]
+        if t_norm == "entrada":
+            return "P1"
+        if t_norm == "saida":
+            return "P2"
         for sin_norm, cod in sorted(mapa.items(), key=lambda x: len(x[0]), reverse=True):
             if len(sin_norm) >= 4 and re.search(r"(?<![a-z0-9])" + re.escape(sin_norm) + r"(?![a-z0-9])", t_norm):
                 return cod
@@ -169,6 +173,20 @@ class LimiteLegal(db.Model):
             }
 
         valor_medido = float(valor_medido)
+        # Concentracoes fisicas negativas (sem limite minimo legal, exceto temperatura) sao dados invalidos
+        if (
+            valor_medido < 0
+            and self.limite_min_conama430 is None
+            and self.limite_min_decreto8468 is None
+            and normalizar_texto(self.parametro) != "temperatura"
+        ):
+            return {
+                "status_conformidade": "Sem Dados",
+                "em_conformidade": None,
+                "norma_violada": None,
+                "alerta": f"Valor negativo inválido ({valor_medido} {self.unidade}) informado para {self.parametro}."
+            }
+
         violacoes = []
         detalhes = []
 
