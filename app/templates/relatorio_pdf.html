@@ -271,13 +271,17 @@
         </thead>
         <tbody>
             {% for imp in impactos_rio %}
-            <tr {% if imp.status_rio != 'Normal' %}class="row-violacao"{% endif %}>
+            <tr {% if imp.status_rio in ('Alerta de Impacto', 'Atenção') %}class="row-violacao"{% endif %}>
                 <td>{{ imp.parametro }}</td>
                 <td>{{ imp.montante_p3 }} {{ imp.unidade }}</td>
                 <td>{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
                 <td>
-                    {{ "%+0.2f"|format(imp.diferenca) }}
-                    <small>({{ "%+0.1f"|format(imp.variacao_pct) }}%)</small>
+                    {{ imp.diferenca|formatar_delta }}
+                    {% if imp.variacao_pct is not none %}
+                        <small>({{ "%+0.1f"|format(imp.variacao_pct) }}%)</small>
+                    {% elif imp.diferenca is not none and imp.diferenca > 0 %}
+                        <small>(novo aporte)</small>
+                    {% endif %}
                 </td>
                 <td>{{ imp.limite_classe2 }}</td>
                 <td class="text-right">
@@ -285,6 +289,8 @@
                         <span class="badge-conforme">Normal</span>
                     {% elif imp.status_rio == 'Atenção' %}
                         <span style="color: #b45309; font-weight: bold;">Atenção</span>
+                    {% elif imp.status_rio == 'Sem Dados' %}
+                        <span class="badge-info">Sem Dados</span>
                     {% else %}
                         <span class="badge-nao-conforme">Impacto</span>
                     {% endif %}
@@ -293,7 +299,7 @@
             {% if imp.alerta_impacto %}
             <tr style="background-color: #fffbeb;">
                 <td colspan="6" style="padding: 4px 8px; font-size: 7.5pt; color: #92400e;">
-                    &bull; <strong>Aviso:</strong> {{ imp.alerta_impacto }}
+                    - <strong>Aviso:</strong> {{ imp.alerta_impacto }}
                 </td>
             </tr>
             {% endif %}

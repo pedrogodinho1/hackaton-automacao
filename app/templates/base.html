@@ -136,17 +136,21 @@
 
     <script>
         (function () {
-            if (sessionStorage.getItem('ete_nav_loading') === '1') {
-                const el = document.getElementById('page-loader');
-                if (el) {
-                    el.hidden = false;
-                    el.classList.add('visible');
-                    el.setAttribute('aria-busy', 'true');
+            try {
+                if (sessionStorage.getItem('ete_nav_loading') === '1') {
+                    const el = document.getElementById('page-loader');
+                    if (el) {
+                        el.hidden = false;
+                        el.classList.add('visible');
+                        el.setAttribute('aria-busy', 'true');
+                    }
                 }
+            } catch (_err) {
+                // Ignora bloqueios de sessionStorage em modos de privacidade estritos
             }
         })();
     </script>
 
-    <script src="{{ url_for('static', filename='js/app.js', v='6') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js', v='7') }}"></script>
 </body>
 </html>

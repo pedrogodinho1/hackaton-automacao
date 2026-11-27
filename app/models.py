@@ -75,7 +75,7 @@ class PontoColeta(db.Model):
         t_norm = normalizar_texto(texto_ponto)
         if not t_norm or t_norm in ("nan", "none"):
             return None
-        match_cod = re.search(r"(?<![a-z0-9])(?:p|ponto\s*)([1-4])(?![a-z0-9])", t_norm)
+        match_cod = re.search(r"(?<![a-z0-9])(?:p[-_\s]?|ponto[-_\s]*)([1-4])(?![a-z0-9])", t_norm)
         if match_cod:
             return f"P{match_cod.group(1)}"
         mapa = mapa_sinonimos if mapa_sinonimos is not None else cls.montar_mapa_sinonimos()
@@ -195,12 +195,13 @@ class LimiteLegal(db.Model):
             atende_conama = False
             violacoes.append("CONAMA 430/2011")
             detalhes.append(f"abaixo do mínimo de {self.limite_min_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
+        estrito_conama = (self.texto_conama430 or "").strip().startswith("<")
         if self.limite_max_conama430 is not None:
-            estrito_conama = (self.texto_conama430 or "").strip().startswith("<")
             excede_conama = valor_medido >= self.limite_max_conama430 if estrito_conama else valor_medido > self.limite_max_conama430
             if excede_conama:
                 atende_conama = False
-                violacoes.append("CONAMA 430/2011")
+                if "CONAMA 430/2011" not in violacoes:
+                    violacoes.append("CONAMA 430/2011")
                 if estrito_conama:
                     detalhes.append(f"igual ou acima do limite de {self.limite_max_conama430} {self.unidade} (CONAMA 430/2011 Art. 16)")
                 else:
@@ -218,16 +219,19 @@ class LimiteLegal(db.Model):
             atende_decreto = False
             violacoes.append("Decreto Estadual 8.468/1976")
             detalhes.append(f"abaixo do mínimo de {self.limite_min_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
+        estrito_decreto = (self.texto_decreto8468 or "").strip().startswith("<")
         if self.limite_max_decreto8468 is not None:
-            estrito_decreto = (self.texto_decreto8468 or "").strip().startswith("<")
             excede_decreto = valor_medido >= self.limite_max_decreto8468 if estrito_decreto else valor_medido > self.limite_max_decreto8468
             if excede_decreto:
                 atende_decreto = False
-                violacoes.append("Decreto Estadual 8.468/1976")
+                if "Decreto Estadual 8.468/1976" not in violacoes:
+                    violacoes.append("Decreto Estadual 8.468/1976")
                 if atende_conama and self.limite_max_conama430 is not None:
+                    op_conama = "<" if estrito_conama else "<="
+                    op_decreto = "<" if estrito_decreto else "<="
                     detalhes.append(
-                        f"atende à federal CONAMA 430/2011 (<= {self.limite_max_conama430} {self.unidade}), "
-                        f"mas ultrapassa o Decreto Estadual 8.468/1976 (<= {self.limite_max_decreto8468} {self.unidade})"
+                        f"atende à federal CONAMA 430/2011 ({op_conama} {self.limite_max_conama430} {self.unidade}), "
+                        f"mas ultrapassa o Decreto Estadual 8.468/1976 ({op_decreto} {self.limite_max_decreto8468} {self.unidade})"
                     )
                 elif estrito_decreto:
                     detalhes.append(f"igual ou acima do limite de {self.limite_max_decreto8468} {self.unidade} (Decreto 8.468/1976 Art. 18)")
@@ -250,12 +254,28 @@ class LimiteLegal(db.Model):
             "alerta": alerta_msg
         }
 
+    @property
+    def limite_max_estrito(self) -> bool:
+        """Indica se o limite maximo restritivo e estritamente menor (<), como Temperatura < 40 C."""
+        if self.limite_max_restritivo is None:
+            return False
+        estrito_c = (
+            self.limite_max_conama430 == self.limite_max_restritivo
+            and (self.texto_conama430 or "").strip().startswith("<")
+        )
+        estrito_d = (
+            self.limite_max_decreto8468 == self.limite_max_restritivo
+            and (self.texto_decreto8468 or "").strip().startswith("<")
+        )
+        return estrito_c or estrito_d
+
     def avaliar_eficiencia(self, valor_p1: float, valor_p2: float) -> dict:
         """
         Calcula a remocao percentual da ETE: ((P1 - P2) / P1) * 100.
         Usa arredondamento tecnico (ROUND_HALF_UP) e valida contra a meta do parametro.
+        Rejeita concentracoes invalidas (P1 <= 0 ou P2 < 0).
         """
-        if not _numero_valido(valor_p1) or not _numero_valido(valor_p2) or float(valor_p1) <= 0:
+        if not _numero_valido(valor_p1) or not _numero_valido(valor_p2) or float(valor_p1) <= 0 or float(valor_p2) < 0:
             return {
                 "eficiencia_pct": None,
                 "avaliacao": "Sem Dados",
@@ -279,28 +299,49 @@ class LimiteLegal(db.Model):
         return {
             "eficiencia_pct": eficiencia,
             "avaliacao": "Operacional",
-            "atingiu_meta": True
+            "atingiu_meta": None
         }
 
     @classmethod
-    def buscar_por_nome(cls, nome_parametro: str):
+    def montar_mapa_busca(cls) -> dict:
+        """Constroi dicionario normalizado (nome, simbolo e sinonimos -> LimiteLegal) para buscas O(1)."""
+        mapa = {}
+        todos = cls.query.all()
+        for item in todos:
+            if item.sinonimos:
+                for s in item.sinonimos.split("|"):
+                    s_norm = normalizar_texto(s)
+                    if s_norm:
+                        mapa.setdefault(s_norm, item)
+        for item in todos:
+            if item.simbolo:
+                simb_norm = normalizar_texto(item.simbolo)
+                if simb_norm:
+                    mapa[simb_norm] = item
+        for item in todos:
+            mapa[normalizar_texto(item.parametro)] = item
+        return mapa
+
+    @classmethod
+    def buscar_por_nome(cls, nome_parametro: str, mapa_busca: dict = None):
         """
         Encontra o parametro no banco comparando o nome digitado,
         seu simbolo quimico ou sua lista de sinonimos.
+        Aceita um mapa pre-carregado via montar_mapa_busca() para evitar consultas repetitivas.
         """
         alvo = normalizar_texto(nome_parametro)
         if not alvo:
             return None
 
-        for item in cls.query.all():
-            if normalizar_texto(item.parametro) == alvo:
-                return item
-            if item.simbolo and normalizar_texto(item.simbolo) == alvo:
-                return item
-            if item.sinonimos:
-                sinonimos_lista = [normalizar_texto(s) for s in item.sinonimos.split("|")]
-                if alvo in sinonimos_lista:
-                    return item
+        mapa = mapa_busca if mapa_busca is not None else cls.montar_mapa_busca()
+        encontrado = mapa.get(alvo)
+        if encontrado is not None:
+            return encontrado
+
+        # Fallback: remove sufixo de unidade entre parenteses (ex: 'Temperatura (°C)', 'Ferro Dissolvido (mg/L)')
+        sem_unid = re.sub(r"\s*\((?:mg/l|ml/l|u\.?ph|°c|ºc|unt|%)\)\s*$", "", alvo).strip()
+        if sem_unid and sem_unid != alvo:
+            return mapa.get(sem_unid)
         return None
 
     def __repr__(self):

@@ -1,4 +1,6 @@
 import hmac
+import math
+import os
 import re
 import secrets
 import zipfile
@@ -28,10 +30,19 @@ def gerar_csrf_token() -> str:
 
 _MAX_XLSX_DESCOMPRIMIDO_BYTES = 50 * 1024 * 1024
 _MAX_XLSX_ENTRADAS_ZIP = 500
+_REGEX_XML_INSEGURO = re.compile(rb'<!(?:DOCTYPE|ENTITY)\b', re.IGNORECASE)
+
+
+def _sanitizar_nome_arquivo(nome: str, fallback: str = 'arquivo') -> str:
+    """Remove componentes de caminho e caracteres de controle do nome de arquivo enviado."""
+    bruto = str(nome or '').replace('\\', '/')
+    base = os.path.basename(bruto)
+    limpo = re.sub(r'[\x00-\x1f\x7f]+', '', base).strip()
+    return (limpo or fallback)[:255]
 
 
 def validar_assinatura_arquivo(arquivo, tipo: str) -> bool:
-    """Confere magic bytes e estrutura interna (.xlsx seguro contra ZIP falso e zip-bomb)."""
+    """Confere magic bytes e estrutura interna (.xlsx seguro contra ZIP falso, zip-bomb e XXE)."""
     cabecalho = arquivo.stream.read(8)
     arquivo.stream.seek(0)
     if tipo == 'pdf':
@@ -44,16 +55,69 @@ def validar_assinatura_arquivo(arquivo, tipo: str) -> bool:
                 infos = zf.infolist()
                 if not infos or len(infos) > _MAX_XLSX_ENTRADAS_ZIP:
                     return False
-                tamanho_total = sum(info.file_size for info in infos)
-                if tamanho_total > _MAX_XLSX_DESCOMPRIMIDO_BYTES:
+
+                nomes_lower = set()
+                tamanho_declarado = 0
+                for info in infos:
+                    # Rejeita entradas criptografadas ou com path traversal
+                    if info.flag_bits & 0x1:
+                        return False
+                    nome = info.filename
+                    if nome.startswith(('/', '\\')) or '..' in nome.replace('\\', '/').split('/'):
+                        return False
+                    nomes_lower.add(nome.lower())
+                    tamanho_declarado += info.file_size
+                    if tamanho_declarado > _MAX_XLSX_DESCOMPRIMIDO_BYTES:
+                        return False
+
+                if '[content_types].xml' not in nomes_lower or 'xl/workbook.xml' not in nomes_lower:
                     return False
-                nomes = set(zf.namelist())
-                return '[Content_Types].xml' in nomes and 'xl/workbook.xml' in nomes
-        except (zipfile.BadZipFile, OSError, ValueError):
+
+                # Valida tamanho real descomprimido (evita zip-bomb com header forjado) e bloqueia XXE/Billion Laughs
+                tamanho_real = 0
+                for info in infos:
+                    eh_xml = info.filename.lower().endswith(('.xml', '.rels'))
+                    cauda = b''
+                    with zf.open(info, 'r') as entrada:
+                        while True:
+                            bloco = entrada.read(65536)
+                            if not bloco:
+                                break
+                            tamanho_real += len(bloco)
+                            if tamanho_real > _MAX_XLSX_DESCOMPRIMIDO_BYTES:
+                                return False
+                            if eh_xml:
+                                janela = cauda + bloco
+                                if _REGEX_XML_INSEGURO.search(janela):
+                                    return False
+                                cauda = bloco[-32:]
+                return True
+        except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, OSError, ValueError):
             return False
         finally:
             arquivo.stream.seek(0)
     return False
+
+
+@app.template_filter('formatar_delta')
+def formatar_delta_filtro(valor) -> str:
+    """Formata variacoes numericas com sinal preservando precisao para metais traco (ex: Hg 0.0002)."""
+    if valor is None or isinstance(valor, bool):
+        return '--'
+    try:
+        num = float(valor)
+    except (TypeError, ValueError):
+        return '--'
+    if not math.isfinite(num):
+        return '--'
+    if num == 0:
+        return '+0.00'
+    abs_num = abs(num)
+    if abs_num < 0.001:
+        return f"{num:+.4f}".rstrip('0').rstrip('.')
+    if abs_num < 0.01:
+        return f"{num:+.3f}"
+    return f"{num:+.2f}"
 
 
 @app.context_processor
@@ -102,6 +166,8 @@ def aplicar_cabecalhos_seguranca(response):
         "frame-ancestors 'none'; "
         "form-action 'self'"
     )
+    if app.config.get('SESSION_COOKIE_SECURE'):
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     if not request.path.startswith('/static/'):
         response.headers.setdefault('Cache-Control', 'no-store')
     return response
@@ -139,8 +205,9 @@ def importar():
         flash("O conteúdo do arquivo não corresponde a uma planilha Excel válida (.xlsx).", "error")
         return redirect(url_for('index'))
 
+    nome_seguro = _sanitizar_nome_arquivo(arquivo.filename, fallback='planilha.xlsx')
     try:
-        resultado = importar_relatorio_excel(arquivo, nome_arquivo=arquivo.filename)
+        resultado = importar_relatorio_excel(arquivo, nome_arquivo=nome_seguro)
         return render_template('relatorio.html', resultado=resultado)
     except ValueError as e:
         flash(f"Não foi possível processar a planilha: {e}", "error")
@@ -175,8 +242,9 @@ def importar_pdf():
         flash("O conteúdo do arquivo não corresponde a um documento PDF válido.", "error")
         return redirect(url_for('importar_pdf'))
 
+    nome_seguro = _sanitizar_nome_arquivo(arquivo.filename, fallback='laudo.pdf')
     try:
-        resultado = importar_relatorio_pdf(arquivo, nome_arquivo=arquivo.filename)
+        resultado = importar_relatorio_pdf(arquivo, nome_arquivo=nome_seguro)
         return render_template('relatorio.html', resultado=resultado)
     except ValueError as e:
         flash(f"Não foi possível processar o laudo em PDF: {e}", "error")
@@ -225,7 +293,7 @@ def baixar_relatorio_pdf(codigo_laudo):
     except HTTPException:
         raise
     except Exception:
-        app.logger.exception("Erro ao gerar PDF do laudo %s.", codigo_laudo)
+        app.logger.exception("Erro ao gerar PDF do laudo %r.", codigo_laudo)
         flash("Não foi possível gerar o arquivo PDF no momento.", "error")
         return redirect(url_for('ver_relatorio', codigo_laudo=codigo_laudo))
 
@@ -248,7 +316,7 @@ def excluir_laudo_rota(codigo_laudo):
         else:
             flash(f"Laudo '{codigo_laudo}' não encontrado.", "error")
     except Exception:
-        app.logger.exception("Erro ao excluir laudo %s.", codigo_laudo)
+        app.logger.exception("Erro ao excluir laudo %r.", codigo_laudo)
         flash("Não foi possível excluir o laudo.", "error")
 
     if origem == 'dashboard':

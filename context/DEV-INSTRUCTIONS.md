@@ -20,7 +20,7 @@ O objetivo do sistema é substituir o processo manual de conferência de laudos 
 
 - **Linguagem:** Python 3.14
 - **Framework Web:** Flask (rotas modulares em `app/routes.py`)
-- **ORM, Banco de Referência e Sessão:** Flask-SQLAlchemy com SQLite (`instance/monitoramento.db`) para normas, pontos de coleta e limites legais; armazenamento em memória da sessão (`_LAUDOS_SESSAO`) para campanhas importadas (zerado ao reiniciar o servidor)
+- **ORM, Banco de Referência e Sessão:** Flask-SQLAlchemy com SQLite (`instance/monitoramento.db`) para normas, pontos de coleta e limites legais; armazenamento em memória isolado por sessão (`_SESSOES_LAUDOS`) para campanhas importadas (zerado ao reiniciar o servidor)
 - **Processamento de Planilhas:** pandas e openpyxl
 - **Processamento e Leitura de PDF:** pypdf (7.1.1)
 - **Geração de Relatórios PDF:** xhtml2pdf
@@ -90,7 +90,7 @@ HACKATON/
   - **CONAMA 430/2011 (Artigo 16)**
   - **Decreto Estadual SP 8.468/1976 (Artigo 18)**
 - Em parâmetros onde ambas as normas estipulam limites diferentes, o sistema aplica automaticamente a norma mais rigorosa (menor valor numérico permitido).
-- Exemplo: Chumbo Total tem limite de 0,5 mg/L no CONAMA 430 e 0,1 mg/L no Decreto SP 8.468. O sistema adota 0,1 mg/L como teto de conformidade.
+- Exemplo: Cianeto Total tem limite de 1,00 mg/L no CONAMA 430 e 0,20 mg/L no Decreto SP 8.468. O sistema adota 0,20 mg/L como teto de conformidade.
 
 ### C. Avaliação de Impacto no Rio Piracicaba (P3 vs P4)
 - Compara a concentração a jusante (P4) com os limites máximos e mínimos do **CONAMA 357/2005 para corpos hídricos Classe 2** (incluindo mínimo de OD e faixa de pH) e variação térmica de 3 °C.
@@ -102,7 +102,7 @@ HACKATON/
 ## 6. Rotas e Fluxo da Aplicação
 
 1. **`GET /` (Relatório de Excel):**
-   - Apresenta a tela de seleção de planilha Excel (.xlsx e .xls) e o histórico de campanhas carregadas na sessão atual.
+   - Apresenta a tela de seleção de planilha Excel (.xlsx) e o histórico de campanhas carregadas na sessão atual.
 2. **`POST /importar`:**
    - Ingestão da planilha via pandas, execução dos cálculos, armazenamento na sessão em memória e renderização do relatório.
 3. **`GET /importar-pdf` (Leitor de PDF):**

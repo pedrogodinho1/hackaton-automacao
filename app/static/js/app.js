@@ -21,6 +21,30 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function safeSessionGet(chave) {
+        try {
+            return sessionStorage.getItem(chave);
+        } catch (_err) {
+            return null;
+        }
+    }
+
+    function safeSessionSet(chave, valor) {
+        try {
+            sessionStorage.setItem(chave, valor);
+        } catch (_err) {
+            // Ignora indisponibilidade de sessionStorage
+        }
+    }
+
+    function safeSessionRemove(chave) {
+        try {
+            sessionStorage.removeItem(chave);
+        } catch (_err) {
+            // Ignora indisponibilidade de sessionStorage
+        }
+    }
+
     /**
      * Controla o overlay de carregamento durante navegacao entre paginas,
      * envio de formularios e atualizacoes dinamicas via API.
@@ -40,7 +64,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         function hide(suave) {
             clearTimeout(hideTimer);
-            sessionStorage.removeItem('ete_nav_loading');
+            safeSessionRemove('ete_nav_loading');
             overlay.classList.remove('visible');
             overlay.setAttribute('aria-busy', 'false');
             if (suave) {
@@ -54,7 +78,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         window.EteLoader = { show, hide };
 
-        if (sessionStorage.getItem('ete_nav_loading') === '1') {
+        if (safeSessionGet('ete_nav_loading') === '1') {
             hideTimer = setTimeout(() => hide(true), 220);
         }
 
@@ -82,18 +106,20 @@ document.addEventListener('DOMContentLoaded', function () {
             } catch (_err) {
                 return;
             }
-            sessionStorage.setItem('ete_nav_loading', '1');
+            safeSessionSet('ete_nav_loading', '1');
             show();
         });
 
         document.addEventListener('submit', function (e) {
             if (e.defaultPrevented) return;
-            sessionStorage.setItem('ete_nav_loading', '1');
+            safeSessionSet('ete_nav_loading', '1');
             show();
         });
 
         window.addEventListener('pageshow', function (e) {
-            if (e.persisted) hide(false);
+            if (e.persisted || safeSessionGet('ete_nav_loading') === '1') {
+                hide(false);
+            }
         });
     }
 
@@ -121,22 +147,31 @@ document.addEventListener('DOMContentLoaded', function () {
             }, false);
         });
 
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropzone.addEventListener(eventName, function (e) {
-                e.preventDefault();
-                e.stopPropagation();
+        dropzone.addEventListener('dragleave', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!e.relatedTarget || !dropzone.contains(e.relatedTarget)) {
                 dropzone.classList.remove('drag-active');
-            }, false);
-        });
+            }
+        }, false);
 
         dropzone.addEventListener('drop', function (e) {
-            const files = e.dataTransfer.files;
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove('drag-active');
+            const files = e.dataTransfer ? e.dataTransfer.files : null;
             if (files && files.length > 0) {
                 ultimoArquivoValido = files[0];
-                input.files = files;
+                if (typeof DataTransfer !== 'undefined') {
+                    const dt = new DataTransfer();
+                    dt.items.add(files[0]);
+                    input.files = dt.files;
+                } else {
+                    input.files = files;
+                }
                 updateFileDisplay(files[0]);
             }
-        });
+        }, false);
 
         input.addEventListener('change', function () {
             if (this.files && this.files.length > 0) {

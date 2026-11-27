@@ -191,7 +191,12 @@
                 <span class="file-spec-tag">CONAMA 357 Cl. 2</span>
             </div>
             <div class="station-card-body relative flex-grow min-h-[260px]">
-                <canvas id="chartRio"></canvas>
+                <div id="rio-chart-vazio" class="{% if dados.graficos.rio_comparativo.parametros %}hidden{% endif %} h-full min-h-[220px] flex items-center justify-center text-center text-xs font-mono text-slate-500 bg-slate-50/70 border border-slate-200 rounded-lg px-4">
+                    Nenhuma medição pareada de Montante (P3) e Jusante (P4) encontrada para esta campanha.
+                </div>
+                <div id="rio-chart-wrap" class="{% if not dados.graficos.rio_comparativo.parametros %}hidden{% endif %} relative h-full min-h-[220px]">
+                    <canvas id="chartRio"></canvas>
+                </div>
             </div>
         </div>
 
@@ -209,7 +214,7 @@
                     {% if dados.graficos.evolucao_parametro_p2.limite_min_restritivo is not none and dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
                         Faixa {{ dados.graficos.evolucao_parametro_p2.limite_min_restritivo }} a {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
                     {% elif dados.graficos.evolucao_parametro_p2.limite_max_restritivo is not none %}
-                        Teto &lt;= {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
+                        Teto {% if dados.graficos.evolucao_parametro_p2.limite_max_estrito %}&lt;{% else %}&lt;={% endif %} {{ dados.graficos.evolucao_parametro_p2.limite_max_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
                     {% elif dados.graficos.evolucao_parametro_p2.limite_min_restritivo is not none %}
                         Mínimo &gt;= {{ dados.graficos.evolucao_parametro_p2.limite_min_restritivo }} {{ dados.graficos.evolucao_parametro_p2.unidade }}
                     {% else %}
@@ -254,7 +259,7 @@
                     <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Alertas de Não Conformidade (P2)</h2>
                     <p class="text-[11px] font-mono text-slate-500 mt-0.5">Parâmetros fora dos padrões legais</p>
                 </div>
-                <span id="badge-count-alertas-p2" class="stamp-badge stamp-violacao">
+                <span id="badge-count-alertas-p2" class="stamp-badge {% if dados.alertas_p2 %}stamp-violacao{% else %}stamp-conforme{% endif %}">
                     {{ dados.alertas_p2|length }} alerta(s)
                 </span>
             </div>
@@ -291,7 +296,7 @@
                     <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Investigação de Impacto no Rio</h2>
                     <p class="text-[11px] font-mono text-slate-500 mt-0.5">Alterações relevantes entre Montante (P3) e Jusante (P4)</p>
                 </div>
-                <span id="badge-count-rio" class="stamp-badge stamp-atencao">
+                <span id="badge-count-rio" class="stamp-badge {% if dados.investigacoes_rio %}stamp-atencao{% else %}stamp-conforme{% endif %}">
                     {{ dados.investigacoes_rio|length }} ocorrência(s)
                 </span>
             </div>
@@ -331,12 +336,13 @@
                 <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wide font-mono">Histórico Consolidado por Campanha</h2>
                 <p class="text-[11px] font-mono text-slate-500 mt-0.5">Resumo de conformidade, eficiência DBO e ocorrências no rio</p>
             </div>
+            {% set campanhas_selecionadas = dados.resumo_campanhas | selectattr('selecionada') | list | length %}
             <div class="flex flex-wrap items-center gap-2">
                 <input type="search"
                        data-table-filter="tabela-dashboard-campanhas"
                        placeholder="Filtrar campanha..."
                        class="table-search-input">
-                <span id="badge-count-campanhas" class="stamp-badge stamp-info">{{ dados.resumo_campanhas|length }} {{ 'campanha' if dados.resumo_campanhas|length == 1 else 'campanhas' }}</span>
+                <span id="badge-count-campanhas" class="stamp-badge stamp-info">{{ campanhas_selecionadas }} {{ 'campanha' if campanhas_selecionadas == 1 else 'campanhas' }}</span>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -355,7 +361,10 @@
                 </thead>
                 <tbody>
                     {% for c in dados.resumo_campanhas %}
-                    <tr data-searchable="true" data-codigo-laudo="{{ c.codigo_laudo }}">
+                    <tr data-searchable="true"
+                        data-codigo-laudo="{{ c.codigo_laudo }}"
+                        data-campanha-hidden="{{ 'false' if c.selecionada else 'true' }}"
+                        {% if not c.selecionada %}style="display: none;"{% endif %}>
                         <td><span class="stamp-badge stamp-info">{{ c.campanha_mes }}</span></td>
                         <td class="font-bold text-[#971E84]">{{ c.codigo_laudo }}</td>
                         <td class="text-slate-600">{{ c.data_coleta }}</td>
@@ -413,7 +422,7 @@
          data-relatorio-url="{{ url_for('ver_relatorio', codigo_laudo='__COD__') }}">
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
     <script>
         const configEl = document.getElementById('dashboard-config');
         const dadosIniciais = JSON.parse(configEl.dataset.dados);
@@ -428,7 +437,7 @@
 
         function escaparHtml(texto) {
             const div = document.createElement('div');
-            div.textContent = texto || '';
+            div.textContent = texto === null || texto === undefined ? '' : String(texto);
             return div.innerHTML;
         }
 
@@ -466,7 +475,9 @@
             const sstTxt = k.eficiencia_media_sst !== null ? `${k.eficiencia_media_sst.toFixed(1)}%` : '--';
             document.getElementById('kpi-sub-eficiencia').textContent = `DQO: ${dqoTxt} | SST: ${sstTxt}`;
 
-            document.getElementById('badge-count-alertas-p2').textContent = `${dados.alertas_p2.length} alerta(s)`;
+            const badgeAlertasP2 = document.getElementById('badge-count-alertas-p2');
+            badgeAlertasP2.textContent = `${dados.alertas_p2.length} alerta(s)`;
+            badgeAlertasP2.className = `stamp-badge ${dados.alertas_p2.length > 0 ? 'stamp-violacao' : 'stamp-conforme'}`;
             const boxAlertas = document.getElementById('lista-alertas-p2');
             if (dados.alertas_p2.length === 0) {
                 boxAlertas.innerHTML = `<div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">Nenhuma não conformidade detectada em P2 no período selecionado.</div>`;
@@ -489,7 +500,9 @@
                 }).join('');
             }
 
-            document.getElementById('badge-count-rio').textContent = `${dados.investigacoes_rio.length} ocorrência(s)`;
+            const badgeRio = document.getElementById('badge-count-rio');
+            badgeRio.textContent = `${dados.investigacoes_rio.length} ocorrência(s)`;
+            badgeRio.className = `stamp-badge ${dados.investigacoes_rio.length > 0 ? 'stamp-atencao' : 'stamp-conforme'}`;
             const boxRio = document.getElementById('lista-investigacoes-rio');
             if (dados.investigacoes_rio.length === 0) {
                 boxRio.innerHTML = `<div class="py-8 text-center text-xs font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-200 rounded-lg">Nenhum impacto ou desvio significativo no Rio Piracicaba no período selecionado.</div>`;
@@ -652,68 +665,80 @@
 
             const rio = g.rio_comparativo;
             document.getElementById('subtitulo-rio-chart').textContent = `Campanha ${rio.campanha_mes} (${rio.codigo_laudo})`;
-            if (chartRio) chartRio.destroy();
-            chartRio = new Chart(document.getElementById('chartRio'), {
-                type: 'bar',
-                data: {
-                    labels: rio.parametros,
-                    datasets: [
-                        {
-                            label: 'Montante (P3)',
-                            data: rio.montante_p3,
-                            backgroundColor: 'rgba(100, 116, 139, 0.65)',
-                            borderRadius: 4
-                        },
-                        {
-                            label: 'Jusante (P4)',
-                            data: rio.jusante_p4,
-                            backgroundColor: rio.status.map(st => st === 'Alerta de Impacto' ? '#b91c1c' : (st === 'Atenção' ? '#b45309' : '#971E84')),
-                            borderRadius: 4
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { font: { family: fonteMono, size: 11 } },
-                            grid: { color: 'rgba(148, 163, 184, 0.15)' }
-                        },
-                        x: {
-                            ticks: { font: { family: fonteMono, size: 10 } },
-                            grid: { display: false }
-                        }
+            const rioVazio = document.getElementById('rio-chart-vazio');
+            const rioWrap = document.getElementById('rio-chart-wrap');
+            if (chartRio) {
+                chartRio.destroy();
+                chartRio = null;
+            }
+            if (!rio.parametros || rio.parametros.length === 0) {
+                if (rioVazio) rioVazio.classList.remove('hidden');
+                if (rioWrap) rioWrap.classList.add('hidden');
+            } else {
+                if (rioVazio) rioVazio.classList.add('hidden');
+                if (rioWrap) rioWrap.classList.remove('hidden');
+                chartRio = new Chart(document.getElementById('chartRio'), {
+                    type: 'bar',
+                    data: {
+                        labels: rio.parametros,
+                        datasets: [
+                            {
+                                label: 'Montante (P3)',
+                                data: rio.montante_p3,
+                                backgroundColor: 'rgba(100, 116, 139, 0.65)',
+                                borderRadius: 4
+                            },
+                            {
+                                label: 'Jusante (P4)',
+                                data: rio.jusante_p4,
+                                backgroundColor: rio.status.map(st => st === 'Alerta de Impacto' ? '#b91c1c' : (st === 'Atenção' ? '#b45309' : '#971E84')),
+                                borderRadius: 4
+                            }
+                        ]
                     },
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { font: { family: fonteMono, size: 11 }, usePointStyle: true }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: { font: { family: fonteMono, size: 11 } },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            },
+                            x: {
+                                ticks: { font: { family: fonteMono, size: 10 } },
+                                grid: { display: false }
+                            }
                         },
-                        tooltip: {
-                            callbacks: {
-                                afterLabel: (ctx) => {
-                                    const idx = ctx.dataIndex;
-                                    const un = rio.unidades[idx] || '';
-                                    const st = rio.status[idx] || 'Normal';
-                                    const lMax = rio.limites_max[idx];
-                                    const lMin = rio.limites_min[idx];
-                                    let limTxt = '';
-                                    if (lMin !== null && lMax !== null) {
-                                        limTxt = ` | Classe 2: ${lMin} a ${lMax}`;
-                                    } else if (lMax !== null) {
-                                        limTxt = ` | Classe 2 <= ${lMax}`;
-                                    } else if (lMin !== null) {
-                                        limTxt = ` | Classe 2 >= ${lMin}`;
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { font: { family: fonteMono, size: 11 }, usePointStyle: true }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: (ctx) => {
+                                        const idx = ctx.dataIndex;
+                                        const un = rio.unidades[idx] || '';
+                                        const st = rio.status[idx] || 'Normal';
+                                        const lMax = rio.limites_max[idx];
+                                        const lMin = rio.limites_min[idx];
+                                        let limTxt = '';
+                                        if (lMin !== null && lMax !== null) {
+                                            limTxt = ` | Classe 2: ${lMin} a ${lMax}`;
+                                        } else if (lMax !== null) {
+                                            limTxt = ` | Classe 2 <= ${lMax}`;
+                                        } else if (lMin !== null) {
+                                            limTxt = ` | Classe 2 >= ${lMin}`;
+                                        }
+                                        return `Unidade: ${un} | Status: ${st}${limTxt}`;
                                     }
-                                    return `Unidade: ${un} | Status: ${st}${limTxt}`;
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
 
             const ep = g.evolucao_parametro_p2;
             document.getElementById('titulo-param-chart').textContent = `Série Histórica em P2: ${ep.parametro || 'Nenhum parâmetro em P2'}`;
@@ -722,7 +747,7 @@
             if (ep.limite_max_restritivo !== null && ep.limite_min_restritivo !== null) {
                 badgeLim.textContent = `Faixa ${ep.limite_min_restritivo} a ${ep.limite_max_restritivo} ${ep.unidade}`;
             } else if (ep.limite_max_restritivo !== null) {
-                badgeLim.textContent = `Teto <= ${ep.limite_max_restritivo} ${ep.unidade}`;
+                badgeLim.textContent = `Teto ${ep.limite_max_estrito ? '<' : '<='} ${ep.limite_max_restritivo} ${ep.unidade}`;
             } else if (ep.limite_min_restritivo !== null) {
                 badgeLim.textContent = `Mínimo >= ${ep.limite_min_restritivo} ${ep.unidade}`;
             } else {
@@ -887,6 +912,10 @@
                 }
                 const novosDados = await resp.json();
                 if (seqAtual !== dashboardReqSeq) return;
+                if (!novosDados.possui_dados) {
+                    window.location.reload();
+                    return;
+                }
                 atualizarKpisEListas(novosDados);
                 renderizarGraficos(novosDados);
             } catch (err) {

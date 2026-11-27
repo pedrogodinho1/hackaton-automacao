@@ -1,4 +1,5 @@
 """Carga inicial das tabelas de referencia ambiental no SQLite (P1-P4, normas e limites legais)."""
+from sqlalchemy.exc import IntegrityError
 from app import app, db
 from app.models import PontoColeta, Legislacao, LimiteLegal
 
@@ -507,6 +508,13 @@ def garantir_banco_referencia(recriar: bool = False, verboso: bool = False):
                 print(f"[OK] {len(limites)} parâmetros químicos e limites legais cadastrados.")
 
         if alterado:
-            db.session.commit()
-            if verboso:
-                print("\nBanco de dados populado e pronto como referência para leitura de laudos e emissão de relatórios!")
+            try:
+                db.session.commit()
+                if verboso:
+                    print("\nBanco de dados populado e pronto como referência para leitura de laudos e emissão de relatórios!")
+            except IntegrityError:
+                # Outro worker pode ter populado o banco de referencia simultaneamente
+                db.session.rollback()
+            except Exception:
+                db.session.rollback()
+                raise

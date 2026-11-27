@@ -67,6 +67,10 @@
                             </svg>
                             <span>Baixar PDF ({{ mes }})</span>
                         </a>
+                        <a href="{{ url_for('ver_relatorio', codigo_laudo=cod_mes) }}"
+                           class="btn-industrial-secondary">
+                            <span>Parecer Completo ({{ mes }})</span>
+                        </a>
                     {% endfor %}
                 {% endif %}
             </div>
@@ -211,9 +215,13 @@
                         <td class="font-sans font-semibold text-slate-800">{{ imp.parametro }}</td>
                         <td class="text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
                         <td class="text-slate-600">{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
-                        <td class="font-semibold {% if imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
-                            {{ '%+0.2f' % imp.diferenca }} {{ imp.unidade }}
-                            <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                        <td class="font-semibold {% if imp.status_rio in ('Alerta de Impacto', 'Atenção') %}text-rose-600{% else %}text-slate-800{% endif %}">
+                            {{ imp.diferenca|formatar_delta }} {{ imp.unidade }}
+                            {% if imp.variacao_pct is not none %}
+                                <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                            {% elif imp.diferenca is not none and imp.diferenca > 0 %}
+                                <span class="text-[10px] text-slate-400">(novo aporte)</span>
+                            {% endif %}
                         </td>
                         <td class="text-slate-500">{{ imp.limite_classe2 }}</td>
                         <td class="text-right">
@@ -221,6 +229,8 @@
                                 <span class="stamp-badge stamp-conforme">Normal</span>
                             {% elif imp.status_rio == 'Atenção' %}
                                 <span class="stamp-badge stamp-atencao">Atenção</span>
+                            {% elif imp.status_rio == 'Sem Dados' %}
+                                <span class="stamp-badge stamp-info">Sem Dados</span>
                             {% else %}
                                 <span class="stamp-badge stamp-violacao">Alerta Impacto</span>
                             {% endif %}
@@ -240,8 +250,59 @@
     </div>
     {% endif %}
 
+    {% if resultado.medicoes_p2 %}
+    <div class="station-card">
+        <div class="station-card-header">
+            <div>
+                <h2 class="text-xs font-mono font-bold text-slate-900 uppercase tracking-wide">Medições no Efluente Tratado (P2)</h2>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">Confronto automático com a norma mais restritiva</p>
+            </div>
+            <input type="search"
+                   data-table-filter="tabela-medicoes-p2-resultado"
+                   placeholder="Filtrar parâmetro..."
+                   class="table-search-input">
+        </div>
+        <div class="overflow-x-auto">
+            <table id="tabela-medicoes-p2-resultado" class="lab-table font-mono">
+                <thead>
+                    <tr>
+                        <th class="text-left">Mês</th>
+                        <th class="text-left">Parâmetro</th>
+                        <th class="text-left">Resultado Medido</th>
+                        <th class="text-left">Unidade</th>
+                        <th class="text-left">Norma Aplicável</th>
+                        <th class="text-right">Status Legal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in resultado.medicoes_p2 %}
+                    <tr data-searchable="true">
+                        <td class="font-bold text-slate-900">{{ m.mes }}</td>
+                        <td class="font-sans font-medium text-slate-900">{{ m.parametro }}</td>
+                        <td class="font-bold text-slate-900">{{ m.valor_texto if m.valor_texto else (m.valor_medido if m.valor_medido is not none else 'Sem Dados') }}</td>
+                        <td class="text-slate-500">{{ m.unidade }}</td>
+                        <td class="text-slate-500 text-[11px]">{{ m.norma_mais_restritiva }}</td>
+                        <td class="text-right">
+                            {% if m.status_conformidade == 'Conforme' %}
+                                <span class="stamp-badge stamp-conforme">Conforme</span>
+                            {% elif m.status_conformidade == 'Não Conforme' %}
+                                <span class="stamp-badge stamp-violacao">Não Conforme</span>
+                            {% elif m.status_conformidade == 'Sem Dados' %}
+                                <span class="stamp-badge stamp-atencao">Sem Dados</span>
+                            {% else %}
+                                <span class="stamp-badge stamp-info">Informativo</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     {% elif laudo %}
-    {% set total_rio_alerta = impactos_rio | selectattr('status_rio', 'ne', 'Normal') | list | length %}
+    {% set total_rio_alerta = impactos_rio | selectattr('status_rio', 'in', ['Alerta de Impacto', 'Atenção']) | list | length %}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="telemetry-card">
             <span class="telemetry-label">Medições em P2</span>
@@ -367,9 +428,13 @@
                         <td class="font-sans font-semibold text-slate-800">{{ imp.parametro }}</td>
                         <td class="text-slate-600">{{ imp.montante_p3 }} {{ imp.unidade }}</td>
                         <td class="text-slate-600">{{ imp.jusante_p4 }} {{ imp.unidade }}</td>
-                        <td class="font-semibold {% if imp.status_rio != 'Normal' %}text-rose-600{% else %}text-slate-800{% endif %}">
-                            {{ '%+0.2f' % imp.diferenca }} {{ imp.unidade }}
-                            <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                        <td class="font-semibold {% if imp.status_rio in ('Alerta de Impacto', 'Atenção') %}text-rose-600{% else %}text-slate-800{% endif %}">
+                            {{ imp.diferenca|formatar_delta }} {{ imp.unidade }}
+                            {% if imp.variacao_pct is not none %}
+                                <span class="text-[10px] text-slate-400">({{ '%+0.1f' % imp.variacao_pct }}%)</span>
+                            {% elif imp.diferenca is not none and imp.diferenca > 0 %}
+                                <span class="text-[10px] text-slate-400">(novo aporte)</span>
+                            {% endif %}
                         </td>
                         <td class="text-slate-500">{{ imp.limite_classe2 }}</td>
                         <td class="text-right">
@@ -377,6 +442,8 @@
                                 <span class="stamp-badge stamp-conforme">Normal</span>
                             {% elif imp.status_rio == 'Atenção' %}
                                 <span class="stamp-badge stamp-atencao">Atenção</span>
+                            {% elif imp.status_rio == 'Sem Dados' %}
+                                <span class="stamp-badge stamp-info">Sem Dados</span>
                             {% else %}
                                 <span class="stamp-badge stamp-violacao">Alerta Impacto</span>
                             {% endif %}
